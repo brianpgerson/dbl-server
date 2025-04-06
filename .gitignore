@@ -1,0 +1,5 @@
+backend/node_modules/
+dong-bong-league/node_modules/
+dong-bong-league/build/
+.env
+.DS_Store
