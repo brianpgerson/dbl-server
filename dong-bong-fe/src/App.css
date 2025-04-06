@@ -14,17 +14,17 @@ body {
   animation: crtFlicker 8s infinite;
 }
 
-/* Subtle CRT flicker */
+/* CRT flicker - more noticeable */
 @keyframes crtFlicker {
   0% { opacity: 1; }
   49% { opacity: 1; }
-  50% { opacity: 0.98; }
+  50% { opacity: 0.94; }
   51% { opacity: 1; }
   59% { opacity: 1; }
-  60% { opacity: 0.99; }
+  60% { opacity: 0.96; }
   61% { opacity: 1; }
   85% { opacity: 1; }
-  86% { opacity: 0.97; }
+  86% { opacity: 0.92; }
   87% { opacity: 1; }
   100% { opacity: 1; }
 }
@@ -38,15 +38,15 @@ body::before {
   bottom: 0;
   background: repeating-linear-gradient(
     0deg,
-    rgba(0, 0, 0, 0.07),
-    rgba(0, 0, 0, 0.07) 1px,
-    transparent 1px,
-    transparent 2px
+    rgba(0, 0, 0, 0.15),
+    rgba(0, 0, 0, 0.15) 2px,
+    transparent 2px,
+    transparent 4px
   );
-  background-size: 100% 4px;
+  background-size: 100% 8px;
   pointer-events: none;
   z-index: 1;
-  animation: scanline 10s linear infinite;
+  animation: scanline 6s linear infinite;
 }
 
 @keyframes scanline {
@@ -81,13 +81,13 @@ body::after {
   right: 0;
   bottom: 0;
   background-image: 
-    radial-gradient(1px 1px at 40px 60px, #fff, rgba(0,0,0,0)),
-    radial-gradient(1px 1px at 20% 50%, rgba(100,200,255,0.9), rgba(0,0,0,0)),
-    radial-gradient(1.5px 1.5px at 30% 90%, rgba(255,255,255,0.9), rgba(0,0,0,0)),
-    radial-gradient(1.5px 1.5px at 60% 15%, rgba(255,200,255,0.9), rgba(0,0,0,0)),
-    radial-gradient(2px 2px at 90% 65%, rgba(255,255,255,0.8), rgba(0,0,0,0));
+    radial-gradient(2px 2px at 40px 60px, #fff, rgba(0,0,0,0)),
+    radial-gradient(2px 2px at 20% 50%, rgba(100,200,255,1), rgba(0,0,0,0)),
+    radial-gradient(2.5px 2.5px at 30% 90%, rgba(255,255,255,1), rgba(0,0,0,0)),
+    radial-gradient(2.5px 2.5px at 60% 15%, rgba(255,200,255,1), rgba(0,0,0,0)),
+    radial-gradient(3px 3px at 90% 65%, rgba(255,255,255,0.9), rgba(0,0,0,0));
   background-size: 200% 200%;
-  opacity: 0.15;
+  opacity: 0.25;
   pointer-events: none;
   z-index: 0;
   animation: starTwinkle 15s ease infinite alternate, starMove 60s linear infinite;
