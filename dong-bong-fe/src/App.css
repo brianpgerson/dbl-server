@@ -1,13 +1,46 @@
 @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
 
 body {
-  background-color: #000;
+  background-color: #0a0a14;
   background-image: 
-    linear-gradient(to right, rgba(86, 61, 124, 0.1) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(86, 61, 124, 0.1) 1px, transparent 1px);
-  background-size: 20px 20px;
+    linear-gradient(to right, rgba(86, 61, 124, 0.07) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(86, 61, 124, 0.07) 1px, transparent 1px),
+    radial-gradient(ellipse at top, #1a0b2e 0%, #101024 40%, #0a0a14 80%);
+  background-size: 20px 20px, 20px 20px, 100% 100%;
+  background-attachment: fixed;
   image-rendering: pixelated;
   color: #fff;
+  position: relative;
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(0, 0, 0, 0.07),
+    rgba(0, 0, 0, 0.07) 1px,
+    transparent 1px,
+    transparent 2px
+  );
+  pointer-events: none;
+  z-index: 1;
+}
+
+body::after {
+  content: '';
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 250px;
+  background: linear-gradient(to top, rgba(255, 41, 151, 0.1) 0%, rgba(255, 0, 204, 0) 100%);
+  pointer-events: none;
+  z-index: 0;
 }
 
 .App {
@@ -18,26 +51,31 @@ body {
 }
 
 .App-header {
-  background-color: #111;
+  background: linear-gradient(to right, rgba(17, 17, 17, 0.9), rgba(45, 15, 70, 0.85), rgba(17, 17, 17, 0.9));
   padding: 1.5rem;
-  color: #0f0;
+  color: #19b8ff;
   margin-bottom: 2rem;
-  border-bottom: 4px solid #0f0;
-  border-top: 4px solid #0f0;
+  border-bottom: 4px solid #19b8ff;
+  border-top: 4px solid #19b8ff;
   position: relative;
-  box-shadow: 0 0 10px #0f0, 0 0 20px #0f0;
+  box-shadow: 
+    0 0 10px #19b8ff, 
+    0 0 20px rgba(25, 184, 255, 0.6);
   text-transform: uppercase;
+  z-index: 10;
+  position: relative;
+  backdrop-filter: blur(5px);
 }
 
 .App-header h1 {
   margin: 0;
   font-size: 2rem;
   letter-spacing: -1px;
-  color: #0f0;
+  color: #19b8ff;
   text-shadow: 
     2px 2px 0px #111,
-    4px 4px 0px #00aa00,
-    -2px -2px 0px #008800;
+    4px 4px 0px #0073b3,
+    -2px -2px 0px #004d82;
 }
 
 .App-header h2 {
@@ -51,11 +89,17 @@ body {
   margin: 2rem auto;
   max-width: 900px;
   padding: 1.5rem;
-  background: #111;
+  background: rgba(17, 17, 17, 0.85);
   border-radius: 0;
-  box-shadow: 0 0 0 4px #444, 0 0 0 8px #222;
-  border: 2px solid #0f0;
+  box-shadow: 
+    0 0 0 4px rgba(68, 68, 68, 0.8), 
+    0 0 0 8px rgba(34, 34, 34, 0.8), 
+    0 0 20px rgba(41, 121, 255, 0.2), 
+    0 0 40px rgba(102, 25, 188, 0.1);
+  border: 2px solid #19b8ff;
   position: relative;
+  backdrop-filter: blur(2px);
+  z-index: 2;
 }
 
 .chart-container h3 {
@@ -66,6 +110,7 @@ body {
   text-shadow: 2px 2px 0px #111;
 }
 
+
 .chart-container::after {
   content: 'HIGH SCORES';
   position: absolute;
@@ -75,7 +120,7 @@ body {
   color: #ff3333;
   font-size: 0.6rem;
   padding: 4px 8px;
-  border: 2px solid #0f0;
+  border: 2px solid #19b8ff;
 }
 
 .loading {
@@ -83,9 +128,9 @@ body {
   margin: 3rem auto;
   max-width: 500px;
   padding: 2rem;
-  border: 4px solid #0f0;
+  border: 4px solid #19b8ff;
   font-size: 1rem;
-  color: #0f0;
+  color: #19b8ff;
   animation: blink 1s step-end infinite;
 }
 

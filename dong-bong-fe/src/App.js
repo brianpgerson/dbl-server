@@ -98,15 +98,15 @@ function App() {
       ];
       
       return {
-        label: team,
+        label: "   " + team, // Add spaces before team name for legend spacing
         data: cumulativeData,
         borderColor: colors[index % colors.length],
-        backgroundColor: 'transparent',
+        backgroundColor: colors[index % colors.length] + '10',
         borderWidth: 3,
-        pointRadius: 6,
-        pointStyle: 'rectRot', // pixel-like square points
+        pointRadius: 5,
+        pointStyle: 'circle',
         pointBackgroundColor: colors[index % colors.length],
-        tension: 0 // no curve - straight pixel lines
+        tension: 0.1 // very slight curve
       };
     });
     
@@ -195,20 +195,27 @@ function App() {
               position: 'bottom', 
               labels: { 
                 font: { family: "'Press Start 2P', cursive", size: 9 },
-                color: '#00ff00'  
-              } 
+                color: '#19b8ff',
+                usePointStyle: true,
+                pointStyle: 'circle',
+                boxWidth: 10,
+                boxHeight: 10,
+                padding: 25,
+                useBorderRadius: true,
+                borderRadius: 2
+              }
             }
           },
           scales: {
             y: { 
               grid: { color: '#333' },
-              ticks: { color: '#00ff00' },
-              border: { color: '#00ff00' } 
+              ticks: { color: '#19b8ff' },
+              border: { color: '#19b8ff' } 
             },
             x: { 
               grid: { color: '#333' },
-              ticks: { color: '#00ff00' },
-              border: { color: '#00ff00' }
+              ticks: { color: '#19b8ff' },
+              border: { color: '#19b8ff' }
             }
           }
         }} />
@@ -222,20 +229,21 @@ function App() {
               position: 'top', 
               labels: { 
                 font: { family: "'Press Start 2P', cursive", size: 10 },
-                color: '#ff3333'  
+                color: '#ff3333',
+                padding: 25
               } 
             }
           },
           scales: {
             y: { 
               grid: { color: '#333' },
-              ticks: { color: '#00ff00' },
-              border: { color: '#00ff00' }
+              ticks: { color: '#19b8ff' },
+              border: { color: '#19b8ff' }
             },
             x: { 
               grid: { color: '#333' },
-              ticks: { color: '#00ff00' },
-              border: { color: '#00ff00' }
+              ticks: { color: '#19b8ff' },
+              border: { color: '#19b8ff' }
             }
           }
         }} />
