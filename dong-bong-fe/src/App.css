@@ -29,7 +29,8 @@ body {
   100% { opacity: 1; }
 }
 
-body::before {
+/* Scanlines layer */
+.scanlines {
   content: '';
   position: fixed;
   top: 0;
@@ -54,7 +55,8 @@ body::before {
   to { background-position: 0 100%; }
 }
 
-body::after {
+/* Pink glow at bottom */
+.pink-glow {
   content: '';
   position: fixed;
   bottom: 0;
@@ -73,7 +75,8 @@ body::after {
   100% { opacity: 0.3; }  
 }
 
-.App::before {
+/* Star field as a separate layer */
+.star-field {
   content: '';
   position: fixed;
   top: 0;
@@ -87,7 +90,7 @@ body::after {
     radial-gradient(2.5px 2.5px at 60% 15%, rgba(255,200,255,1), rgba(0,0,0,0)),
     radial-gradient(3px 3px at 90% 65%, rgba(255,255,255,0.9), rgba(0,0,0,0));
   background-size: 200% 200%;
-  opacity: 0.25;
+  opacity: 0.3;
   pointer-events: none;
   z-index: 0;
   animation: starTwinkle 15s ease infinite alternate, starMove 60s linear infinite;
