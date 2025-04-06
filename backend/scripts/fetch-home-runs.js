@@ -89,7 +89,10 @@ async function fetchHomeRuns(startDate, endDate) {
   } catch (error) {
     console.error('Error fetching home runs:', error.message);
   } finally {
-    pool.end();
+    // Only end the pool if we're running as standalone script
+    if (require.main === module) {
+      pool.end();
+    }
   }
 }
 

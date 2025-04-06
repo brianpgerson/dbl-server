@@ -181,14 +181,15 @@ function App() {
   }
 
   return (
-    <div className="App">
+    <>
       <div className="star-field"></div>
       <div className="scanlines"></div>
       <div className="pink-glow"></div>
-      <header className="App-header">
-        <h1>Dong Bong League</h1>
-        <h2>2025 Season - Press Start</h2>
-      </header>
+      <div className="App">
+        <header className="App-header">
+          <h1>Dong Bong League</h1>
+          <h2>2025 Season - Press Start</h2>
+        </header>
       
       <div className="chart-container">
         <h3>Career Mode Progress</h3>
@@ -251,7 +252,8 @@ function App() {
           }
         }} />
       </div>
-    </div>
+      </div>
+    </>
   );
 }
 

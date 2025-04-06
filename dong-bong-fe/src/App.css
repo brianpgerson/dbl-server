@@ -45,8 +45,7 @@ body {
     transparent 4px
   );
   background-size: 100% 8px;
-  pointer-events: none;
-  z-index: 1;
+  z-index: 10;
   animation: scanline 6s linear infinite;
 }
 
@@ -64,7 +63,7 @@ body {
   height: 250px;
   background: linear-gradient(to top, rgba(255, 41, 151, 0.1) 0%, rgba(255, 0, 204, 0) 100%);
   pointer-events: none;
-  z-index: 0;
+  z-index: 9;
 }
 
 /* Star field */
@@ -90,7 +89,7 @@ body {
   background-size: 200% 200%;
   opacity: 0.3;
   pointer-events: none;
-  z-index: 0;
+  z-index: 8;
   animation: starTwinkle 15s ease infinite alternate, starMove 60s linear infinite;
 }
 
