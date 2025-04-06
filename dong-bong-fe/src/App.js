@@ -85,28 +85,28 @@ function App() {
         return null;
       });
       
-      // Fun backyard ballpark colors
+      // Retro arcade colors - bright neons
       const colors = [
-        '#E53935', // Red
-        '#43A047', // Green  
-        '#1E88E5', // Blue
-        '#FB8C00', // Orange
-        '#8E24AA', // Purple
-        '#00ACC1', // Teal
-        '#FFB300', // Amber
-        '#6D4C41'  // Brown
+        '#00ff00', // Green (Matrix)
+        '#ff00ff', // Magenta
+        '#00ffff', // Cyan
+        '#ffff00', // Yellow
+        '#ff3333', // Red
+        '#3333ff', // Blue
+        '#ff8800', // Orange
+        '#ffffff'  // White
       ];
       
       return {
         label: team,
         data: cumulativeData,
         borderColor: colors[index % colors.length],
-        backgroundColor: colors[index % colors.length] + '20', // 20% opacity
-        fill: true,
+        backgroundColor: 'transparent',
         borderWidth: 3,
-        pointRadius: 4,
+        pointRadius: 6,
+        pointStyle: 'rectRot', // pixel-like square points
         pointBackgroundColor: colors[index % colors.length],
-        tension: 0.2
+        tension: 0 // no curve - straight pixel lines
       };
     });
     
@@ -140,27 +140,28 @@ function App() {
       }
     }
     
-    // Fun backyard ballpark colors
+    // Retro arcade colors - bright neons
     const colors = [
-      '#E53935', // Red
-      '#43A047', // Green  
-      '#1E88E5', // Blue
-      '#FB8C00', // Orange
-      '#8E24AA', // Purple
-      '#00ACC1', // Teal
-      '#FFB300', // Amber
-      '#6D4C41'  // Brown
+      '#00ff00', // Green (Matrix)
+      '#ff00ff', // Magenta
+      '#00ffff', // Cyan
+      '#ffff00', // Yellow
+      '#ff3333', // Red
+      '#3333ff', // Blue
+      '#ff8800', // Orange
+      '#ffffff'  // White
     ];
     
     return {
       labels: sortedTeams,
       datasets: [{
-        label: 'Total Dingers',
+        label: 'Total Bombs',
         data: sortedTotals,
         backgroundColor: sortedTeams.map((_, index) => colors[index % colors.length]),
-        borderColor: sortedTeams.map((_, index) => colors[index % colors.length]),
+        borderColor: '#000',
         borderWidth: 2,
-        borderRadius: 6
+        borderRadius: 0, // pixel-perfect rectangles
+        barThickness: 20 // chunky arcade bars
       }]
     };
   };
@@ -172,8 +173,8 @@ function App() {
           <h1>Dong Bong League</h1>
         </header>
         <div className="loading">
-          <p>Getting the latest scores from the backyard...</p>
-          <p style={{ fontFamily: "'Permanent Marker', cursive", fontSize: '24px' }}>⚾ ⚾ ⚾</p>
+          <p>LOADING DATA...</p>
+          <p style={{ fontSize: '24px' }}>⏳ 8%</p>
         </div>
       </div>
     );
@@ -183,23 +184,59 @@ function App() {
     <div className="App">
       <header className="App-header">
         <h1>Dong Bong League</h1>
-        <h2>2025 Backyard Home Run Derby</h2>
+        <h2>2025 Season - Press Start</h2>
       </header>
       
       <div className="chart-container">
-        <h3>Season Long Bomb Contest</h3>
+        <h3>Career Mode Progress</h3>
         <Line data={prepareLineChartData()} options={{
           plugins: {
-            legend: { position: 'bottom', labels: { font: { family: "'Kalam', cursive", size: 14 } } }
+            legend: { 
+              position: 'bottom', 
+              labels: { 
+                font: { family: "'Press Start 2P', cursive", size: 9 },
+                color: '#00ff00'  
+              } 
+            }
+          },
+          scales: {
+            y: { 
+              grid: { color: '#333' },
+              ticks: { color: '#00ff00' },
+              border: { color: '#00ff00' } 
+            },
+            x: { 
+              grid: { color: '#333' },
+              ticks: { color: '#00ff00' },
+              border: { color: '#00ff00' }
+            }
           }
         }} />
       </div>
       
       <div className="chart-container">
-        <h3>Current Leaderboard</h3>
+        <h3>High Score Board</h3>
         <Bar data={prepareBarChartData()} options={{
           plugins: {
-            legend: { position: 'top', labels: { font: { family: "'Kalam', cursive", size: 14 } } }
+            legend: { 
+              position: 'top', 
+              labels: { 
+                font: { family: "'Press Start 2P', cursive", size: 10 },
+                color: '#ff3333'  
+              } 
+            }
+          },
+          scales: {
+            y: { 
+              grid: { color: '#333' },
+              ticks: { color: '#00ff00' },
+              border: { color: '#00ff00' }
+            },
+            x: { 
+              grid: { color: '#333' },
+              ticks: { color: '#00ff00' },
+              border: { color: '#00ff00' }
+            }
           }
         }} />
       </div>
