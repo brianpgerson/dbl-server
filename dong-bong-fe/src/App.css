@@ -11,6 +11,22 @@ body {
   image-rendering: pixelated;
   color: #fff;
   position: relative;
+  animation: crtFlicker 8s infinite;
+}
+
+/* Subtle CRT flicker */
+@keyframes crtFlicker {
+  0% { opacity: 1; }
+  49% { opacity: 1; }
+  50% { opacity: 0.98; }
+  51% { opacity: 1; }
+  59% { opacity: 1; }
+  60% { opacity: 0.99; }
+  61% { opacity: 1; }
+  85% { opacity: 1; }
+  86% { opacity: 0.97; }
+  87% { opacity: 1; }
+  100% { opacity: 1; }
 }
 
 body::before {
@@ -27,8 +43,15 @@ body::before {
     transparent 1px,
     transparent 2px
   );
+  background-size: 100% 4px;
   pointer-events: none;
   z-index: 1;
+  animation: scanline 10s linear infinite;
+}
+
+@keyframes scanline {
+  from { background-position: 0 0; }
+  to { background-position: 0 100%; }
 }
 
 body::after {
@@ -41,6 +64,38 @@ body::after {
   background: linear-gradient(to top, rgba(255, 41, 151, 0.1) 0%, rgba(255, 0, 204, 0) 100%);
   pointer-events: none;
   z-index: 0;
+}
+
+/* Star field */
+@keyframes starTwinkle {
+  0% { opacity: 0.3; }
+  50% { opacity: 1; }
+  100% { opacity: 0.3; }  
+}
+
+.App::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-image: 
+    radial-gradient(1px 1px at 40px 60px, #fff, rgba(0,0,0,0)),
+    radial-gradient(1px 1px at 20% 50%, rgba(100,200,255,0.9), rgba(0,0,0,0)),
+    radial-gradient(1.5px 1.5px at 30% 90%, rgba(255,255,255,0.9), rgba(0,0,0,0)),
+    radial-gradient(1.5px 1.5px at 60% 15%, rgba(255,200,255,0.9), rgba(0,0,0,0)),
+    radial-gradient(2px 2px at 90% 65%, rgba(255,255,255,0.8), rgba(0,0,0,0));
+  background-size: 200% 200%;
+  opacity: 0.15;
+  pointer-events: none;
+  z-index: 0;
+  animation: starTwinkle 15s ease infinite alternate, starMove 60s linear infinite;
+}
+
+@keyframes starMove {
+  from { background-position: 0% 0%; } 
+  to { background-position: 100% 100%; }
 }
 
 .App {
@@ -102,25 +157,51 @@ body::after {
   z-index: 2;
 }
 
+/* Chrome arcade corners */
+.chart-container::before {
+  content: '';
+  position: absolute;
+  width: 30px;
+  height: 30px;
+  top: -2px;
+  left: -2px;
+  border-top: 4px solid rgba(200, 200, 255, 0.7);
+  border-left: 4px solid rgba(200, 200, 255, 0.7);
+  z-index: 3;
+}
+
+.chart-container::after {
+  content: '';
+  position: absolute;
+  width: 30px;
+  height: 30px;
+  bottom: -2px;
+  right: -2px;
+  border-bottom: 4px solid rgba(200, 200, 255, 0.7);
+  border-right: 4px solid rgba(200, 200, 255, 0.7);
+  z-index: 3;
+}
+
+/* Additional corner for the bottom left */
+.chart-container > div::before {
+  content: '';
+  position: absolute;
+  width: 30px;
+  height: 30px;
+  bottom: -2px;
+  left: -2px;
+  border-bottom: 4px solid rgba(200, 200, 255, 0.7);
+  border-left: 4px solid rgba(200, 200, 255, 0.7);
+  z-index: 3;
+}
+
+
 .chart-container h3 {
   color: #ff3333;
   text-transform: uppercase;
   font-size: 1rem;
   letter-spacing: 1px;
   text-shadow: 2px 2px 0px #111;
-}
-
-
-.chart-container::after {
-  content: 'HIGH SCORES';
-  position: absolute;
-  top: -10px;
-  right: 10px;
-  background: #111;
-  color: #ff3333;
-  font-size: 0.6rem;
-  padding: 4px 8px;
-  border: 2px solid #19b8ff;
 }
 
 .loading {
