@@ -1,0 +1,59 @@
+.team-roster {
+  max-width: 900px;
+  margin: 2rem auto;
+  padding: 1.5rem;
+  background: rgba(17, 17, 17, 0.85);
+  border: 2px solid #19b8ff;
+  color: #fff;
+  font-family: 'Press Start 2P', cursive;
+  box-shadow: 0 0 20px rgba(41, 121, 255, 0.2);
+}
+
+.team-roster h3 {
+  color: #ff3333;
+  font-size: 1.2rem;
+  margin: 0 0 10px 0;
+  text-align: center;
+}
+
+.team-roster-manager {
+  color: #19b8ff;
+  font-size: 0.8rem;
+  margin-bottom: 20px;
+  text-align: center;
+}
+
+.roster-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+.roster-table th {
+  padding: 10px;
+  color: #ff3333;
+  text-align: left;
+  border-bottom: 2px solid #19b8ff;
+}
+
+.roster-table td {
+  padding: 10px;
+  border-bottom: 1px solid rgba(25, 184, 255, 0.3);
+}
+
+.roster-table tr:last-child td {
+  border-bottom: none;
+}
+
+.roster-table .bench-player {
+  opacity: 0.6;
+}
+
+.team-roster-loading,
+.team-roster-error {
+  text-align: center;
+  padding: 50px;
+  color: #19b8ff;
+  font-family: 'Press Start 2P', cursive;
+  font-size: 0.8rem;
+}

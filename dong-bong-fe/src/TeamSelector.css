@@ -1,0 +1,87 @@
+.team-selector {
+  position: fixed;
+  top: 15%;
+  right: 2%;
+  width: 14%;
+  min-width: 150px;
+  background: rgba(17, 17, 17, 0.85);
+  border: 2px solid #19b8ff;
+  padding: 0.5rem;
+  color: #fff;
+  text-align: left;
+  font-family: 'Press Start 2P', cursive;
+  font-size: 0.7rem;
+  box-shadow: 0 0 20px rgba(41, 121, 255, 0.2);
+  z-index: 20;
+}
+
+@media (max-width: 768px) {
+  .team-selector {
+    top: auto;
+    bottom: 0;
+    right: 0;
+    width: 100%;
+    min-width: unset;
+    display: flex;
+    flex-direction: column;
+    border-width: 2px 0 0 0;
+  }
+  
+  .team-selector h3 {
+    font-size: 0.7rem;
+    padding: 5px 0;
+    margin: 0;
+  }
+  
+  .team-selector ul {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-around;
+  }
+  
+  .team-selector li {
+    font-size: 0.6rem;
+    padding: 4px;
+    margin: 2px;
+    border-left: none;
+    border-bottom: 2px solid transparent;
+  }
+  
+  .team-selector li:hover, .team-selector li.selected {
+    border-left: none;
+    border-bottom: 2px solid #19b8ff;
+  }
+}
+
+.team-selector h3 {
+  color: #ff3333;
+  font-size: 0.8rem;
+  margin: 0 0 10px 0;
+  padding-bottom: 5px;
+  border-bottom: 1px solid #19b8ff;
+  text-align: center;
+}
+
+.team-selector ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.team-selector li {
+  padding: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-bottom: 4px;
+  border-left: 3px solid transparent;
+}
+
+.team-selector li:hover {
+  background: rgba(25, 184, 255, 0.2);
+  border-left: 3px solid rgba(25, 184, 255, 0.8);
+}
+
+.team-selector li.selected {
+  background: rgba(25, 184, 255, 0.3);
+  border-left: 3px solid #19b8ff;
+}

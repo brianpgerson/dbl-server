@@ -3,6 +3,8 @@ import axios from 'axios';
 import { Line, Bar } from 'react-chartjs-2';
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend } from 'chart.js';
 import './App.css';
+import TeamSelector from './components/TeamSelector';
+import TeamRoster from './components/TeamRoster';
 
 // Register Chart.js components
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend);
@@ -10,6 +12,8 @@ ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarEleme
 function App() {
   const [raceData, setRaceData] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [teams, setTeams] = useState([]);
+  const [selectedTeam, setSelectedTeam] = useState(null); // null means show charts
 
   useEffect(() => {
     // Connect to real backend data
@@ -24,6 +28,17 @@ function App() {
         // Fall back to mock data on error
         const mockData = generateMockData();
         setRaceData(mockData);
+      });
+  }, []);
+  
+  // Fetch teams
+  useEffect(() => {
+    axios.get('http://localhost:3001/api/teams')
+      .then(response => {
+        setTeams(response.data);
+      })
+      .catch(error => {
+        console.error('Error fetching teams:', error);
       });
   }, []);
 
@@ -185,73 +200,80 @@ function App() {
       <div className="star-field"></div>
       <div className="scanlines"></div>
       <div className="pink-glow"></div>
+      <TeamSelector teams={teams} onSelectTeam={setSelectedTeam} selectedTeam={selectedTeam} />
       <div className="App">
         <header className="App-header">
           <h1>Dong Bong League</h1>
           <h2>2025 Season - Press Start</h2>
         </header>
-      
-      <div className="chart-container">
-        <h3>Career Mode Progress</h3>
-        <Line data={prepareLineChartData()} options={{
-          plugins: {
-            legend: { 
-              position: 'bottom', 
-              labels: { 
-                font: { family: "'Press Start 2P', cursive", size: 9 },
-                color: '#19b8ff',
-                usePointStyle: true,
-                pointStyle: 'circle',
-                boxWidth: 10,
-                boxHeight: 10,
-                padding: 25,
-                useBorderRadius: true,
-                borderRadius: 2
-              }
-            }
-          },
-          scales: {
-            y: { 
-              grid: { color: '#333' },
-              ticks: { color: '#19b8ff' },
-              border: { color: '#19b8ff' } 
-            },
-            x: { 
-              grid: { color: '#333' },
-              ticks: { color: '#19b8ff' },
-              border: { color: '#19b8ff' }
-            }
-          }
-        }} />
-      </div>
-      
-      <div className="chart-container">
-        <h3>High Score Board</h3>
-        <Bar data={prepareBarChartData()} options={{
-          plugins: {
-            legend: { 
-              position: 'top', 
-              labels: { 
-                font: { family: "'Press Start 2P', cursive", size: 10 },
-                color: '#ff3333',
-                padding: 25
-              } 
-            }
-          },
-          scales: {
-            y: { 
-              grid: { color: '#333' },
-              ticks: { color: '#19b8ff' },
-              border: { color: '#19b8ff' }
-            },
-            x: { 
-              grid: { color: '#333' },
-              ticks: { color: '#19b8ff' },
-              border: { color: '#19b8ff' }
-            }
-          }
-        }} />
-      </div>
+        
+        {selectedTeam ? (
+          <TeamRoster team={selectedTeam} />
+        ) : (
+          <>
+            <div className="chart-container">
+              <h3>Career Mode Progress</h3>
+              <Line data={prepareLineChartData()} options={{
+                plugins: {
+                  legend: { 
+                    position: 'bottom', 
+                    labels: { 
+                      font: { family: "'Press Start 2P', cursive", size: 9 },
+                      color: '#19b8ff',
+                      usePointStyle: true,
+                      pointStyle: 'circle',
+                      boxWidth: 10,
+                      boxHeight: 10,
+                      padding: 25,
+                      useBorderRadius: true,
+                      borderRadius: 2
+                    }
+                  }
+                },
+                scales: {
+                  y: { 
+                    grid: { color: '#333' },
+                    ticks: { color: '#19b8ff' },
+                    border: { color: '#19b8ff' } 
+                  },
+                  x: { 
+                    grid: { color: '#333' },
+                    ticks: { color: '#19b8ff' },
+                    border: { color: '#19b8ff' }
+                  }
+                }
+              }} />
+            </div>
+            
+            <div className="chart-container">
+              <h3>High Score Board</h3>
+              <Bar data={prepareBarChartData()} options={{
+                plugins: {
+                  legend: { 
+                    position: 'top', 
+                    labels: { 
+                      font: { family: "'Press Start 2P', cursive", size: 10 },
+                      color: '#ff3333',
+                      padding: 25
+                    } 
+                  }
+                },
+                scales: {
+                  y: { 
+                    grid: { color: '#333' },
+                    ticks: { color: '#19b8ff' },
+                    border: { color: '#19b8ff' }
+                  },
+                  x: { 
+                    grid: { color: '#333' },
+                    ticks: { color: '#19b8ff' },
+                    border: { color: '#19b8ff' }
+                  }
+                }
+              }} />
+            </div>
+          </>
+        )}
       </div>
     </>
   );

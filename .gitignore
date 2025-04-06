@@ -1,5 +1,6 @@
 backend/node_modules/
 dong-bong-league/node_modules/
 dong-bong-league/build/
+/screenshots
 .env
 .DS_Store

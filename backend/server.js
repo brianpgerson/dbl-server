@@ -264,6 +264,40 @@ app.get('/api/teams', async (req, res) => {
   }
 });
 
+// Get team roster with HR counts
+app.get('/api/team/:id/roster-with-hrs', async (req, res) => {
+  try {
+    const query = `
+      WITH current_roster AS (
+        SELECT 
+          p.id as player_id, p.name, p.primary_position, p.mlb_id,
+          tr.position, tr.drafted_position, tr.status
+        FROM team_rosters tr
+        JOIN players p ON tr.player_id = p.id
+        WHERE tr.team_id = $1
+        AND tr.end_date IS NULL
+      )
+      SELECT 
+        r.player_id, r.name, r.position, r.status,
+        COALESCE(COUNT(s.id), 0)::integer as hr_count
+      FROM current_roster r
+      LEFT JOIN scores s ON s.team_id = $1 AND s.position = r.position
+      GROUP BY r.player_id, r.name, r.position, r.status
+      ORDER BY 
+        CASE r.position
+          WHEN 'BEN' THEN 'ZZZ' -- Sort bench players last
+          ELSE r.position
+        END,
+        hr_count DESC
+    `;
+    const result = await pool.query(query, [req.params.id]);
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok' });
