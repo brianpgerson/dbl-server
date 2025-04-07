@@ -9,7 +9,7 @@ const TeamRoster = ({ team }) => {
   
   useEffect(() => {
     setLoading(true);
-    axios.get(`http://localhost:3001/api/team/${team.id}/roster-with-hrs`)
+    axios.get(`${process.env.REACT_APP_API_URL}/api/team/${team.id}/roster-with-hrs`)
       .then(response => {
         setRoster(response.data);
         setLoading(false);

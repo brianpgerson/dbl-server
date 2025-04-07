@@ -1,10 +1,10 @@
 const express = require('express');
-const { Pool } = require('pg');
 const cors = require('cors');
 const cron = require('node-cron');
 const fetchHomeRuns = require('./scripts/fetch-home-runs');
 const syncMlbData = require('./scripts/sync-mlb-data');
 const axios = require('axios');
+const { getDbPool } = require('./db');
 require('dotenv').config();
 
 const app = express();
@@ -13,9 +13,7 @@ const port = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL
-});
+const pool = getDbPool();
 
 // Get current roster with status for a team
 app.get('/api/roster/:teamId', async (req, res) => {

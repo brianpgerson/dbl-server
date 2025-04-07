@@ -17,7 +17,7 @@ function App() {
 
   useEffect(() => {
     // Connect to real backend data
-    axios.get('http://localhost:3001/api/race')
+    axios.get(`${process.env.REACT_APP_API_URL}/api/race`)
       .then(response => {
         setRaceData(response.data);
         setLoading(false);
@@ -33,7 +33,7 @@ function App() {
   
   // Fetch teams
   useEffect(() => {
-    axios.get('http://localhost:3001/api/teams')
+    axios.get(`${process.env.REACT_APP_API_URL}/api/teams`)
       .then(response => {
         setTeams(response.data);
       })
