@@ -3,7 +3,8 @@ const { Pool } = require('pg');
 require('dotenv').config({ path: '../.env' });
 
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || 'postgres://localhost:5432/dong_bong_league'
+  connectionString: process.env.DATABASE_URL || 'postgres://localhost:5432/dong_bong_league',
+  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
 });
 
 const MLB_API_BASE = 'https://statsapi.mlb.com/api/v1';

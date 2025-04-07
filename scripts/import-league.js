@@ -4,7 +4,8 @@ const { parse } = require('csv-parse/sync');
 require('dotenv').config({ path: '../.env' });
 
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || 'postgres://localhost:5432/dong_bong_league'
+  connectionString: process.env.DATABASE_URL || 'postgres://localhost:5432/dong_bong_league',
+  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
 });
 
 async function importLeague() {
