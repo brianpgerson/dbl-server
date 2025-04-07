@@ -2,12 +2,12 @@ const { Pool } = require('pg');
 require('dotenv').config();
 
 const getDbPool = () => {
-  // Check if we're on Heroku
-  const isHeroku = process.env.DATABASE_URL && process.env.DATABASE_URL.includes('herokuapp.com');
+  // For Heroku, use SSL; for local, don't
+  const isProduction = process.env.NODE_ENV === 'production';
   
   return new Pool({
     connectionString: process.env.DATABASE_URL || 'postgres://localhost:5432/dong_bong_league',
-    ssl: isHeroku ? { rejectUnauthorized: false } : false
+    ssl: isProduction ? { rejectUnauthorized: false } : false
   });
 };
 
