@@ -1,10 +1,8 @@
 const axios = require('axios');
-const { Pool } = require('pg');
 require('dotenv').config({ path: '../.env' });
+const { getDbPool } = require('../db');
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || 'postgres://localhost:5432/dong_bong_league'
-});
+const pool = getDbPool();
 
 const MLB_API_BASE = 'https://statsapi.mlb.com/api/v1';
 
