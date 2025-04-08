@@ -355,9 +355,11 @@ app.listen(port, () => {
   
   // Start HR fetch cron job hourly
   console.log('Starting HR fetch cron service...');
-  cron.schedule('0 * * * *', async () => {
+  
+  // Function to run HR fetch
+  const runHRFetch = async () => {
     const now = new Date();
-    console.log(`[${now.toISOString()}] Running hourly HR fetch...`);
+    console.log(`[${now.toISOString()}] Running HR fetch...`);
     
     try {
       // Get yesterday and today to catch overnight games
@@ -371,7 +373,13 @@ app.listen(port, () => {
     } catch (error) {
       console.error(`[${new Date().toISOString()}] HR fetch error:`, error.message);
     }
-  });
+  };
+  
+  // Run once at startup
+  runHRFetch();
+  
+  // Schedule to run hourly
+  cron.schedule('0 * * * *', runHRFetch);
   console.log('Cron service started. HR data will be fetched hourly.');
   
   // Full MLB data sync daily at 4am
