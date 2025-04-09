@@ -129,6 +129,11 @@ app.post('/api/roster/swap', async (req, res) => {
     return res.status(400).json({ error: 'Missing required fields' });
   }
   
+  // Convert IDs to integers in case they come in as strings
+  const team = parseInt(teamId);
+  const p1 = parseInt(player1Id);
+  const p2 = parseInt(player2Id);
+  
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -139,15 +144,21 @@ app.post('/api/roster/swap', async (req, res) => {
              p.mlb_id, p.name, p.current_mlb_team_id
       FROM team_rosters tr
       JOIN players p ON tr.player_id = p.id
-      WHERE tr.team_id = $1 AND tr.player_id IN ($2, $3)
+      WHERE tr.team_id = $1 AND (tr.player_id = $2 OR tr.player_id = $3) 
+      AND tr.end_date IS NULL
     `;
-    const playersResult = await client.query(playersQuery, [teamId, player1Id, player2Id]);
+    console.log(`Swapping players: Team=${team}, Player1=${p1}, Player2=${p2}`);  
+    const playersResult = await client.query(playersQuery, [team, p1, p2]);
+    console.log(`Query results: Found ${playersResult.rows.length} players`);
+    if (playersResult.rows.length > 0) {
+      console.log(`Found players: ${playersResult.rows.map(p => `${p.name} (${p.player_id})`).join(', ')}`);
+    }
     if (playersResult.rows.length !== 2) {
       throw new Error('One or both players not found on team');
     }
     
-    const player1 = playersResult.rows.find(p => p.player_id === player1Id);
-    const player2 = playersResult.rows.find(p => p.player_id === player2Id);
+    const player1 = playersResult.rows.find(p => p.player_id === p1);
+    const player2 = playersResult.rows.find(p => p.player_id === p2);
     
     // Validate the swap
     // When moving TO bench, we don't need position validation
@@ -203,27 +214,27 @@ app.post('/api/roster/swap', async (req, res) => {
     await client.query(
       `UPDATE team_rosters SET end_date = $1 
        WHERE team_id = $2 AND player_id = $3 AND end_date IS NULL`,
-      [effectiveDate, teamId, player1Id]  
+      [effectiveDate, team, p1]  
     );
     
     await client.query(
       `UPDATE team_rosters SET end_date = $1
        WHERE team_id = $2 AND player_id = $3 AND end_date IS NULL`,
-      [effectiveDate, teamId, player2Id]
+      [effectiveDate, team, p2]
     );
     
     // Then create new entries
     await client.query(
       `INSERT INTO team_rosters (team_id, player_id, position, drafted_position, status, reason, effective_date)
        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [teamId, player1Id, player2.position, player1.drafted_position, 
+      [team, p1, player2.position, player1.drafted_position, 
        player2.position === 'BEN' ? 'BENCH' : 'STARTER', player2.position === 'BEN' ? reason : null, effectiveDate]  
     );
     
     await client.query(
       `INSERT INTO team_rosters (team_id, player_id, position, drafted_position, status, reason, effective_date) 
        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [teamId, player2Id, player1.position, player2.drafted_position,
+      [team, p2, player1.position, player2.drafted_position,
        player1.position === 'BEN' ? 'BENCH' : 'STARTER', player1.position === 'BEN' ? reason : null, effectiveDate]
     );
     
