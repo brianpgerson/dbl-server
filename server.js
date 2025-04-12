@@ -373,13 +373,11 @@ app.listen(port, () => {
     console.log(`[${now.toISOString()}] Running HR fetch...`);
     
     try {
-      // Get yesterday and today to catch overnight games
-      const yesterday = new Date();
-      yesterday.setDate(yesterday.getDate() - 1);
-      const yesterdayStr = yesterday.toISOString().split('T')[0];
+      // Get all season data from opening day to today
+      const openingDay = '2025-03-27';  // Season start
       const todayStr = new Date().toISOString().split('T')[0];
       
-      await fetchHomeRuns(yesterdayStr, todayStr);
+      await fetchHomeRuns(openingDay, todayStr);
       console.log(`[${new Date().toISOString()}] HR fetch completed successfully`);
     } catch (error) {
       console.error(`[${new Date().toISOString()}] HR fetch error:`, error.message);
