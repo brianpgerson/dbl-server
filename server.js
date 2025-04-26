@@ -3,6 +3,7 @@ const cors = require('cors');
 const cron = require('node-cron');
 const fetchHomeRuns = require('./scripts/fetch-home-runs');
 const syncMlbData = require('./scripts/sync-mlb-data');
+const syncPlayerStatus = require('./scripts/sync-player-status');
 const axios = require('axios');
 const { getDbPool } = require('./db');
 require('dotenv').config();
@@ -21,7 +22,8 @@ app.get('/api/roster/:teamId', async (req, res) => {
     const query = `
       SELECT 
         p.id as player_id, p.name, p.primary_position, p.mlb_id,
-        tr.position, tr.drafted_position, tr.status, tr.reason
+        tr.position, tr.drafted_position, tr.status as roster_status, tr.reason,
+        p.status as player_status
       FROM team_rosters tr
       JOIN players p ON tr.player_id = p.id
       WHERE tr.team_id = $1
@@ -280,7 +282,8 @@ app.get('/api/team/:id/roster-with-hrs', async (req, res) => {
       WITH current_roster AS (
         SELECT 
           p.id as player_id, p.name, p.primary_position, p.mlb_id,
-          tr.position, tr.drafted_position, tr.status
+          tr.position, tr.drafted_position, tr.status as roster_status,
+          p.status as player_status
         FROM team_rosters tr
         JOIN players p ON tr.player_id = p.id
         WHERE tr.team_id = $1
@@ -300,7 +303,7 @@ app.get('/api/team/:id/roster-with-hrs', async (req, res) => {
         GROUP BY tr.player_id
       )
       SELECT 
-        r.player_id, r.name, r.position, r.status,
+        r.player_id, r.name, r.position, r.roster_status, r.player_status,
         COALESCE(ph.hr_count, 0)::integer as hr_count
       FROM current_roster r
       LEFT JOIN player_hrs ph ON ph.player_id = r.player_id
@@ -413,4 +416,18 @@ app.listen(port, () => {
       console.error(`[${new Date().toISOString()}] MLB data sync error:`, error.message);
     }
   });
+  
+  // Player status sync every 30 minutes
+  cron.schedule('*/30 * * * *', async () => {
+    console.log(`[${new Date().toISOString()}] Running player status sync...`);
+    try {
+      await syncPlayerStatus();
+      console.log(`[${new Date().toISOString()}] Player status sync completed successfully`);
+    } catch (error) {
+      console.error(`[${new Date().toISOString()}] Player status sync error:`, error.message);
+    }
+  });
+  
+  // Also run player status sync once at startup
+  syncPlayerStatus();
 });

@@ -34,6 +34,7 @@ CREATE TABLE players (
   mlb_id INTEGER NOT NULL UNIQUE,
   primary_position VARCHAR(10) NOT NULL,
   current_mlb_team_id INTEGER,
+  status VARCHAR(20) DEFAULT 'Active',
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
