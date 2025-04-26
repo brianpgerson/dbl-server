@@ -285,13 +285,25 @@ app.get('/api/team/:id/roster-with-hrs', async (req, res) => {
         JOIN players p ON tr.player_id = p.id
         WHERE tr.team_id = $1
         AND tr.end_date IS NULL
+      ),
+      player_hrs AS (
+        SELECT 
+          tr.player_id,
+          COUNT(s.id) as hr_count
+        FROM team_rosters tr
+        JOIN scores s ON s.team_id = tr.team_id 
+          AND s.position = tr.position
+          AND s.date >= tr.effective_date
+          AND (tr.end_date IS NULL OR s.date < tr.end_date)
+        WHERE tr.team_id = $1
+        AND tr.status = 'STARTER'
+        GROUP BY tr.player_id
       )
       SELECT 
         r.player_id, r.name, r.position, r.status,
-        COALESCE(COUNT(s.id), 0)::integer as hr_count
+        COALESCE(ph.hr_count, 0)::integer as hr_count
       FROM current_roster r
-      LEFT JOIN scores s ON s.team_id = $1 AND s.position = r.position
-      GROUP BY r.player_id, r.name, r.position, r.status
+      LEFT JOIN player_hrs ph ON ph.player_id = r.player_id
       ORDER BY 
         CASE r.position
           WHEN 'BEN' THEN 'ZZZ' -- Sort bench players last
