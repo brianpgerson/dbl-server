@@ -125,10 +125,15 @@ app.post('/api/roster/move', async (req, res) => {
 
 // Swap two players' positions
 app.post('/api/roster/swap', async (req, res) => {
-  const { teamId, player1Id, player2Id, reason } = req.body;
+  const { teamId, player1Id, player2Id, reason, effectiveDate } = req.body;
   
   if (!teamId || !player1Id || !player2Id) {
     return res.status(400).json({ error: 'Missing required fields' });
+  }
+
+  // Validate effectiveDate format if provided
+  if (effectiveDate && !/^\d{4}-\d{2}-\d{2}$/.test(effectiveDate)) {
+    return res.status(400).json({ error: 'effectiveDate must be in YYYY-MM-DD format' });
   }
   
   // Convert IDs to integers in case they come in as strings
@@ -172,43 +177,49 @@ app.post('/api/roster/swap', async (req, res) => {
       throw new Error('Drafted starters can only return to their original position');
     }
     
-    // Check if either player's team has games in progress/completed today
+    // Determine effective date - use provided date or calculate based on game status
     const today = new Date().toISOString().split('T')[0];
-    const scheduleUrl = `https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=${today}&gameType=R&fields=dates,date,games,gamePk,teams,team,id,status,statusCode`;
-    const scheduleResponse = await axios.get(scheduleUrl);
-    
+    let calculatedEffectiveDate = today;
     let playersWithActiveGames = [];
-    let effectiveDate = today;
     
-    // Get team IDs from the database - no API call needed
-    const player1TeamId = player1.current_mlb_team_id;
-    const player2TeamId = player2.current_mlb_team_id;
-    
-    // Check if any games for players' teams are active/completed
-    if (scheduleResponse.data.dates.length > 0) {
-      const games = scheduleResponse.data.dates[0].games;
-      for (const game of games) {
-        if (['F', 'P', 'I'].includes(game.status.statusCode)) {
-          const homeTeamId = game.teams.home.team.id;
-          const awayTeamId = game.teams.away.team.id;
-          
-          if (player1TeamId === homeTeamId || player1TeamId === awayTeamId) {
-            playersWithActiveGames.push(player1);
-          }
-          
-          if (player2TeamId === homeTeamId || player2TeamId === awayTeamId) {
-            playersWithActiveGames.push(player2);
+    // If effectiveDate is provided, use it directly
+    if (effectiveDate) {
+      calculatedEffectiveDate = effectiveDate;
+    } else {
+      // Calculate effective date based on current MLB game status
+      const scheduleUrl = `https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=${today}&gameType=R&fields=dates,date,games,gamePk,teams,team,id,status,statusCode`;
+      const scheduleResponse = await axios.get(scheduleUrl);
+      
+      // Get team IDs from the database - no API call needed
+      const player1TeamId = player1.current_mlb_team_id;
+      const player2TeamId = player2.current_mlb_team_id;
+      
+      // Check if any games for players' teams are active/completed
+      if (scheduleResponse.data.dates.length > 0) {
+        const games = scheduleResponse.data.dates[0].games;
+        for (const game of games) {
+          if (['F', 'P', 'I'].includes(game.status.statusCode)) {
+            const homeTeamId = game.teams.home.team.id;
+            const awayTeamId = game.teams.away.team.id;
+            
+            if (player1TeamId === homeTeamId || player1TeamId === awayTeamId) {
+              playersWithActiveGames.push(player1);
+            }
+            
+            if (player2TeamId === homeTeamId || player2TeamId === awayTeamId) {
+              playersWithActiveGames.push(player2);
+            }
           }
         }
       }
-    }
-    
-    // If any games active/complete, set effective date to tomorrow
-    if (playersWithActiveGames.length > 0) {
-      const tomorrow = new Date();
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      effectiveDate = tomorrow.toISOString().split('T')[0];
-      console.log(`Players already playing today: ${playersWithActiveGames.map(p => p.name).join(', ')}`);
+      
+      // If any games active/complete, set effective date to tomorrow
+      if (playersWithActiveGames.length > 0) {
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        calculatedEffectiveDate = tomorrow.toISOString().split('T')[0];
+        console.log(`Players already playing today: ${playersWithActiveGames.map(p => p.name).join(', ')}`);
+      }
     }
     
     // Execute the swap by ending current entries and creating new ones
@@ -216,13 +227,13 @@ app.post('/api/roster/swap', async (req, res) => {
     await client.query(
       `UPDATE team_rosters SET end_date = $1 
        WHERE team_id = $2 AND player_id = $3 AND end_date IS NULL`,
-      [effectiveDate, team, p1]  
+      [calculatedEffectiveDate, team, p1]  
     );
     
     await client.query(
       `UPDATE team_rosters SET end_date = $1
        WHERE team_id = $2 AND player_id = $3 AND end_date IS NULL`,
-      [effectiveDate, team, p2]
+      [calculatedEffectiveDate, team, p2]
     );
     
     // Then create new entries
@@ -230,27 +241,30 @@ app.post('/api/roster/swap', async (req, res) => {
       `INSERT INTO team_rosters (team_id, player_id, position, drafted_position, status, reason, effective_date)
        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
       [team, p1, player2.position, player1.drafted_position, 
-       player2.position === 'BEN' ? 'BENCH' : 'STARTER', player2.position === 'BEN' ? reason : null, effectiveDate]  
+       player2.position === 'BEN' ? 'BENCH' : 'STARTER', player2.position === 'BEN' ? reason : null, calculatedEffectiveDate]  
     );
     
     await client.query(
       `INSERT INTO team_rosters (team_id, player_id, position, drafted_position, status, reason, effective_date) 
        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
       [team, p2, player1.position, player2.drafted_position,
-       player1.position === 'BEN' ? 'BENCH' : 'STARTER', player1.position === 'BEN' ? reason : null, effectiveDate]
+       player1.position === 'BEN' ? 'BENCH' : 'STARTER', player1.position === 'BEN' ? reason : null, calculatedEffectiveDate]
     );
     
     await client.query('COMMIT');
     
     // Return success with right message based on effective date
     let message;
-    if (effectiveDate === today) {
+    if (effectiveDate) {
+      // Custom effective date provided
+      message = `Players swapped successfully - effective ${calculatedEffectiveDate}`;
+    } else if (calculatedEffectiveDate === today) {
       message = 'Players swapped successfully - effective immediately';
     } else {
       const affectedPlayers = playersWithActiveGames.map(p => p.name).join(', ');
-      message = `Players swapped successfully - change will be effective ${effectiveDate} (${affectedPlayers} already playing today)`;
+      message = `Players swapped successfully - change will be effective ${calculatedEffectiveDate} (${affectedPlayers} already playing today)`;
     }
-    res.json({ success: true, message, effectiveDate });
+    res.json({ success: true, message, effectiveDate: calculatedEffectiveDate });
   } catch (err) {
     await client.query('ROLLBACK');
     console.error(err);
