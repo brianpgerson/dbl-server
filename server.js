@@ -1,6 +1,8 @@
 const express = require('express');
 const cors = require('cors');
 const cron = require('node-cron');
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
 const fetchHomeRuns = require('./scripts/fetch-home-runs');
 const syncMlbData = require('./scripts/sync-mlb-data');
 const syncPlayerStatus = require('./scripts/sync-player-status');
@@ -124,7 +126,7 @@ app.post('/api/roster/move', async (req, res) => {
 });
 
 // Swap two players' positions
-app.post('/api/roster/swap', async (req, res) => {
+app.post('/api/roster/swap', authenticateToken, async (req, res) => {
   const { teamId, player1Id, player2Id, reason, effectiveDate } = req.body;
   
   if (!teamId || !player1Id || !player2Id) {
@@ -140,6 +142,25 @@ app.post('/api/roster/swap', async (req, res) => {
   const team = parseInt(teamId);
   const p1 = parseInt(player1Id);
   const p2 = parseInt(player2Id);
+  
+  // Check if user has permission to manage this team
+  // First check if user manages this specific team
+  const canManageTeam = req.user.teamIds.includes(team);
+  
+  // If not, check if user is commissioner for this team's league
+  let canCommissionTeam = false;
+  if (!canManageTeam && req.user.commissionerLeagues.length > 0) {
+    const teamLeagueQuery = `SELECT league_id FROM teams WHERE id = $1`;
+    const teamLeagueResult = await pool.query(teamLeagueQuery, [team]);
+    if (teamLeagueResult.rows.length > 0) {
+      const teamLeague = teamLeagueResult.rows[0].league_id;
+      canCommissionTeam = req.user.commissionerLeagues.includes(teamLeague);
+    }
+  }
+  
+  if (!canManageTeam && !canCommissionTeam) {
+    return res.status(403).json({ error: 'Not authorized to manage this team' });
+  }
   
   const client = await pool.connect();
   try {
@@ -330,6 +351,97 @@ app.get('/api/team/:id/roster-with-hrs', async (req, res) => {
     `;
     const result = await pool.query(query, [req.params.id]);
     res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// JWT middleware for protected routes
+const authenticateToken = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
+
+  if (!token) {
+    return res.status(401).json({ error: 'Access token required' });
+  }
+
+  jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key', (err, user) => {
+    if (err) {
+      return res.status(403).json({ error: 'Invalid or expired token' });
+    }
+    req.user = user;
+    next();
+  });
+};
+
+// Auth routes
+app.post('/api/auth/login', async (req, res) => {
+  const { email, password } = req.body;
+  
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Email and password required' });
+  }
+
+  try {
+    // Find user by email
+    const userQuery = `
+      SELECT u.id, u.email, u.password_hash,
+             array_agg(ut.team_id) as team_ids,
+             array_agg(t.name) as team_names,
+             array_agg(ut.role) as roles,
+             array_agg(ut.league_id) as league_ids
+      FROM users u
+      LEFT JOIN user_teams ut ON u.id = ut.user_id
+      LEFT JOIN teams t ON ut.team_id = t.id
+      WHERE u.email = $1
+      GROUP BY u.id, u.email, u.password_hash
+    `;
+    
+    const result = await pool.query(userQuery, [email.toLowerCase()]);
+    
+    if (result.rows.length === 0) {
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    const user = result.rows[0];
+    
+    // Verify password
+    const validPassword = await bcrypt.compare(password, user.password_hash);
+    if (!validPassword) {
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    // Generate JWT token
+    const roles = user.roles.filter(role => role !== null);
+    const leagueIds = user.league_ids.filter(id => id !== null);
+    const commissionerLeagues = leagueIds.filter((leagueId, index) => 
+      roles[index] === 'commissioner'
+    );
+    
+    const token = jwt.sign(
+      { 
+        userId: user.id, 
+        email: user.email,
+        teamIds: user.team_ids.filter(id => id !== null), // Remove null values
+        leagueIds: leagueIds,
+        commissionerLeagues: commissionerLeagues
+      },
+      process.env.JWT_SECRET || 'your-secret-key',
+      { expiresIn: '7d' }
+    );
+
+    res.json({
+      token,
+      user: {
+        id: user.id,
+        email: user.email,
+        teams: user.team_ids.filter(id => id !== null).map((id, index) => ({
+          id: id,
+          name: user.team_names[index]
+        }))
+      }
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Server error' });
