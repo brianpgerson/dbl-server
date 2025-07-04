@@ -317,7 +317,7 @@ app.post('/api/roster/swap', authenticateToken, async (req, res) => {
 app.get('/api/teams', async (req, res) => {
   try {
     const query = `
-      SELECT id, name, manager_name FROM teams
+      SELECT id, name, manager_name, league_id FROM teams
       ORDER BY name
     `;
     const result = await pool.query(query);
@@ -439,7 +439,8 @@ app.post('/api/auth/login', async (req, res) => {
         teams: user.team_ids.filter(id => id !== null).map((id, index) => ({
           id: id,
           name: user.team_names[index]
-        }))
+        })),
+        commissionerLeagues: commissionerLeagues
       }
     });
   } catch (err) {
