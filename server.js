@@ -328,6 +328,86 @@ app.get('/api/teams', async (req, res) => {
   }
 });
 
+// Helper function to get today's game data for players
+async function getTodaysGameData(playerMlbTeamIds) {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const scheduleUrl = `https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=${today}&gameType=R&fields=dates,date,games,gamePk,teams,team,id,name,abbreviation,status,statusCode,detailedState,gameDate`;
+    
+    const scheduleResponse = await axios.get(scheduleUrl);
+    const gameData = {};
+    
+    if (scheduleResponse.data.dates && scheduleResponse.data.dates.length > 0) {
+      const games = scheduleResponse.data.dates[0].games;
+      
+      games.forEach(game => {
+        const homeTeamId = game.teams.home.team.id;
+        const awayTeamId = game.teams.away.team.id;
+        const homeTeamAbbr = game.teams.home.team.abbreviation;
+        const awayTeamAbbr = game.teams.away.team.abbreviation;
+        const status = game.status.statusCode;
+        const detailedState = game.status.detailedState;
+        
+        // Parse game time
+        const gameDate = new Date(game.gameDate);
+        const gameTime = gameDate.toLocaleTimeString('en-US', { 
+          hour: 'numeric', 
+          minute: '2-digit',
+          hour12: true,
+          timeZone: 'America/Los_Angeles' // Adjust timezone as needed
+        });
+        
+        let gameInfo = '';
+        let gameStatus = 'scheduled';
+        
+        if (status === 'S' || status === 'P') {
+          // Scheduled or Pre-game
+          gameInfo = `${gameTime}`;
+          gameStatus = 'scheduled';
+        } else if (status === 'I' || status === 'MA') {
+          // In Progress or Manager's Challenge
+          gameInfo = `Live`;
+          gameStatus = 'live';
+        } else if (status === 'F' || status === 'FT') {
+          // Final or Final/Tied
+          gameInfo = `Final`;
+          gameStatus = 'final';
+        } else if (status === 'D' || status === 'DR') {
+          // Delayed or Delayed Rain
+          gameInfo = `Delayed`;
+          gameStatus = 'delayed';
+        } else if (status === 'PO') {
+          // Postponed
+          gameInfo = `PPD`;
+          gameStatus = 'postponed';
+        } else {
+          gameInfo = detailedState || status;
+          gameStatus = 'other';
+        }
+        
+        // Store for both teams
+        if (playerMlbTeamIds.includes(homeTeamId)) {
+          gameData[homeTeamId] = {
+            text: `vs ${awayTeamAbbr} ${gameInfo}`,
+            status: gameStatus
+          };
+        }
+        if (playerMlbTeamIds.includes(awayTeamId)) {
+          gameData[awayTeamId] = {
+            text: `@${homeTeamAbbr} ${gameInfo}`,
+            status: gameStatus
+          };
+        }
+      });
+    }
+    
+    return gameData;
+  } catch (error) {
+    console.error('Error fetching game data:', error);
+    return {};
+  }
+}
+
 // Get team roster with HR counts
 app.get('/api/team/:id/roster-with-hrs', async (req, res) => {
   try {
@@ -336,7 +416,7 @@ app.get('/api/team/:id/roster-with-hrs', async (req, res) => {
         SELECT 
           p.id as player_id, p.name, p.primary_position, p.mlb_id,
           tr.position, tr.drafted_position, tr.status as roster_status,
-          p.status as player_status
+          p.status as player_status, p.current_mlb_team_id
         FROM team_rosters tr
         JOIN players p ON tr.player_id = p.id
         WHERE tr.team_id = $1
@@ -356,7 +436,7 @@ app.get('/api/team/:id/roster-with-hrs', async (req, res) => {
         GROUP BY tr.player_id
       )
       SELECT 
-        r.player_id, r.name, r.position, r.roster_status, r.player_status,
+        r.player_id, r.name, r.position, r.drafted_position, r.roster_status, r.player_status, r.current_mlb_team_id,
         COALESCE(ph.hr_count, 0)::integer as hr_count
       FROM current_roster r
       LEFT JOIN player_hrs ph ON ph.player_id = r.player_id
@@ -368,7 +448,23 @@ app.get('/api/team/:id/roster-with-hrs', async (req, res) => {
         hr_count DESC
     `;
     const result = await pool.query(query, [req.params.id]);
-    res.json(result.rows);
+    
+    // Get unique MLB team IDs from roster
+    const uniqueTeamIds = [...new Set(result.rows
+      .map(player => player.current_mlb_team_id)
+      .filter(id => id !== null))];
+    
+    // Fetch today's game data
+    const gameData = await getTodaysGameData(uniqueTeamIds);
+    
+    // Add game info to each player
+    const rosterWithGames = result.rows.map(player => ({
+      ...player,
+      game_info: gameData[player.current_mlb_team_id]?.text || 'No game',
+      game_status: gameData[player.current_mlb_team_id]?.status || 'none'
+    }));
+    
+    res.json(rosterWithGames);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Server error' });
