@@ -328,11 +328,19 @@ app.get('/api/teams', async (req, res) => {
   }
 });
 
+// MLB team ID to abbreviation mapping
+const MLB_TEAM_ABBREVIATIONS = {
+  108: 'LAA', 109: 'ARI', 110: 'BAL', 111: 'BOS', 112: 'CHC', 113: 'CIN', 114: 'CLE', 115: 'COL',
+  116: 'DET', 117: 'HOU', 118: 'KC', 119: 'LAD', 120: 'WSH', 121: 'NYM', 122: 'OAK', 133: 'SD',
+  134: 'SEA', 135: 'SF', 136: 'STL', 137: 'TB', 138: 'TEX', 139: 'TOR', 140: 'MIA', 141: 'MIL',
+  142: 'MIN', 143: 'PHI', 144: 'ATL', 145: 'CWS', 147: 'NYY', 158: 'MIL'
+};
+
 // Helper function to get today's game data for players
 async function getTodaysGameData(playerMlbTeamIds) {
   try {
     const today = new Date().toISOString().split('T')[0];
-    const scheduleUrl = `https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=${today}&gameType=R&fields=dates,date,games,gamePk,teams,team,id,name,abbreviation,status,statusCode,detailedState,gameDate`;
+    const scheduleUrl = `https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=${today}&gameType=R&fields=dates,date,games,gamePk,teams,team,id,name,status,statusCode,detailedState,gameDate`;
     
     const scheduleResponse = await axios.get(scheduleUrl);
     const gameData = {};
@@ -343,8 +351,8 @@ async function getTodaysGameData(playerMlbTeamIds) {
       games.forEach(game => {
         const homeTeamId = game.teams.home.team.id;
         const awayTeamId = game.teams.away.team.id;
-        const homeTeamAbbr = game.teams.home.team.abbreviation;
-        const awayTeamAbbr = game.teams.away.team.abbreviation;
+        const homeTeamAbbr = MLB_TEAM_ABBREVIATIONS[homeTeamId] || 'UNK';
+        const awayTeamAbbr = MLB_TEAM_ABBREVIATIONS[awayTeamId] || 'UNK';
         const status = game.status.statusCode;
         const detailedState = game.status.detailedState;
         
