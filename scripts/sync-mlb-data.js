@@ -1,31 +1,31 @@
 const axios = require('axios');
-const { Pool } = require('pg');
 require('dotenv').config({ path: '../.env' });
+const { getDbPool } = require('../db');
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || 'postgres://localhost:5432/dong_bong_league',
-  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
-});
+const pool = getDbPool();
 
 const MLB_API_BASE = 'https://statsapi.mlb.com/api/v1';
 
 async function syncMlbData() {
   try {
     console.log('Starting MLB data sync...');
-    
+
+    // Use current year for MLB API season
+    const currentYear = new Date().getFullYear();
+
     // Get all teams from MLB API
-    const teamsUrl = `${MLB_API_BASE}/teams?leagueIds=103,104&season=2025`;
+    const teamsUrl = `${MLB_API_BASE}/teams?leagueIds=103,104&season=${currentYear}`;
     const teamsResponse = await axios.get(teamsUrl);
     const teams = teamsResponse.data.teams;
     console.log(`Found ${teams.length} MLB teams`);
-    
+
     // Track all active MLB player IDs we find
     const activeMlbIds = new Set();
     const mlbPlayerData = {};
-    
+
     // Process all teams
     for (const team of teams) {
-      const rosterUrl = `${MLB_API_BASE}/teams/${team.id}/roster?rosterType=40Man&season=2025`;
+      const rosterUrl = `${MLB_API_BASE}/teams/${team.id}/roster?rosterType=40Man&season=${currentYear}`;
       const rosterResponse = await axios.get(rosterUrl);
       const roster = rosterResponse.data.roster || [];
       

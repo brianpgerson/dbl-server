@@ -13,7 +13,10 @@ require('dotenv').config();
 const app = express();
 const port = process.env.PORT || 3001;
 
-app.use(cors());
+app.use(cors({
+  origin: process.env.CORS_ORIGIN || 'https://dong-bong-league.com',
+  credentials: true
+}));
 app.use(express.json());
 
 const pool = getDbPool();
@@ -27,7 +30,7 @@ const authenticateToken = (req, res, next) => {
     return res.status(401).json({ error: 'Access token required' });
   }
 
-  jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key', (err, user) => {
+  jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
     if (err) {
       return res.status(403).json({ error: 'Invalid or expired token' });
     }
@@ -63,7 +66,7 @@ app.get('/api/roster/:teamId', async (req, res) => {
 });
 
 // Make a roster move (bench/activate player)
-app.post('/api/roster/move', async (req, res) => {
+app.post('/api/roster/move', authenticateToken, async (req, res) => {
   const { teamId, playerId, newPosition, reason, effectiveDate } = req.body;
   
   if (!teamId || !playerId || !newPosition || !effectiveDate) {
@@ -77,7 +80,7 @@ app.post('/api/roster/move', async (req, res) => {
     // Get current player status
     const playerQuery = `
       SELECT position, drafted_position, status FROM team_rosters
-      WHERE team_id = $1 AND player_id = $2
+      WHERE team_id = $1 AND player_id = $2 AND end_date IS NULL
     `;
     const playerResult = await client.query(playerQuery, [teamId, playerId]);
     if (playerResult.rows.length === 0) {
@@ -313,14 +316,23 @@ app.post('/api/roster/swap', authenticateToken, async (req, res) => {
   }
 });
 
-// Get all teams
+// Get all teams (optionally filter by league_id)
 app.get('/api/teams', async (req, res) => {
   try {
-    const query = `
-      SELECT id, name, manager_name, league_id FROM teams
-      ORDER BY name
-    `;
-    const result = await pool.query(query);
+    let query, params;
+    if (req.query.league_id) {
+      query = `SELECT id, name, manager_name, league_id FROM teams WHERE league_id = $1 ORDER BY name`;
+      params = [req.query.league_id];
+    } else {
+      // Default: return teams from the most recent league
+      query = `
+        SELECT id, name, manager_name, league_id FROM teams
+        WHERE league_id = (SELECT id FROM leagues ORDER BY season_year DESC LIMIT 1)
+        ORDER BY name
+      `;
+      params = [];
+    }
+    const result = await pool.query(query, params);
     res.json(result.rows);
   } catch (err) {
     console.error(err);
@@ -328,12 +340,12 @@ app.get('/api/teams', async (req, res) => {
   }
 });
 
-// MLB team ID to abbreviation mapping
+// MLB team ID to abbreviation mapping (verified against statsapi.mlb.com 2025 season)
 const MLB_TEAM_ABBREVIATIONS = {
-  108: 'LAA', 109: 'ARI', 110: 'BAL', 111: 'BOS', 112: 'CHC', 113: 'CIN', 114: 'CLE', 115: 'COL',
-  116: 'DET', 117: 'HOU', 118: 'KC', 119: 'LAD', 120: 'WSH', 121: 'NYM', 122: 'OAK', 133: 'SD',
-  134: 'SEA', 135: 'SF', 136: 'STL', 137: 'TB', 138: 'TEX', 139: 'TOR', 140: 'MIA', 141: 'MIL',
-  142: 'MIN', 143: 'PHI', 144: 'ATL', 145: 'CWS', 147: 'NYY', 158: 'MIL'
+  108: 'LAA', 109: 'AZ',  110: 'BAL', 111: 'BOS', 112: 'CHC', 113: 'CIN', 114: 'CLE', 115: 'COL',
+  116: 'DET', 117: 'HOU', 118: 'KC',  119: 'LAD', 120: 'WSH', 121: 'NYM', 133: 'ATH', 134: 'PIT',
+  135: 'SD',  136: 'SEA', 137: 'SF',  138: 'STL', 139: 'TB',  140: 'TEX', 141: 'TOR', 142: 'MIN',
+  143: 'PHI', 144: 'ATL', 145: 'CWS', 146: 'MIA', 147: 'NYY', 158: 'MIL'
 };
 
 // Helper function to get today's game data for players
@@ -531,7 +543,7 @@ app.post('/api/auth/login', async (req, res) => {
         leagueIds: leagueIds,
         commissionerLeagues: commissionerLeagues
       },
-      process.env.JWT_SECRET || 'your-secret-key',
+      process.env.JWT_SECRET,
       { expiresIn: '7d' }
     );
 
@@ -561,15 +573,25 @@ app.get('/api/health', (req, res) => {
 // Get home run race data
 app.get('/api/race', async (req, res) => {
   try {
+    // Get the active league (most recent by season_year)
+    const leagueResult = await pool.query(
+      `SELECT id, season_year, start_date, end_date FROM leagues ORDER BY season_year DESC LIMIT 1`
+    );
+    if (leagueResult.rows.length === 0) {
+      return res.status(404).json({ error: 'No league found' });
+    }
+    const league = leagueResult.rows[0];
+
     const query = `
       WITH daily_totals AS (
-        SELECT 
+        SELECT
           teams.id as team_id,
           teams.name as team_name,
-          scores.date::date, -- Cast to date to remove time component
+          scores.date::date,
           COUNT(*) as daily_hrs
         FROM scores
         JOIN teams ON scores.team_id = teams.id
+        WHERE teams.league_id = $1
         GROUP BY teams.id, teams.name, scores.date::date
       ),
       running_totals AS (
@@ -582,12 +604,12 @@ app.get('/api/race', async (req, res) => {
         FROM daily_totals
       ),
       team_list AS (
-        SELECT id, name 
-        FROM teams 
-        WHERE league_id = (SELECT id FROM leagues WHERE season_year = 2025 LIMIT 1)
+        SELECT id, name
+        FROM teams
+        WHERE league_id = $1
       ),
       date_range AS (
-        SELECT generate_series('2025-03-27'::date, CURRENT_DATE, '1 day'::interval)::date as date
+        SELECT generate_series($2::date, LEAST(CURRENT_DATE, $3::date), '1 day'::interval)::date as date
       )
       SELECT
         t.name as team_name,
@@ -599,8 +621,8 @@ app.get('/api/race', async (req, res) => {
       LEFT JOIN running_totals r ON t.name = r.team_name AND d.date = r.date
       ORDER BY d.date, t.name
     `;
-    const result = await pool.query(query);
-    res.json(result.rows);
+    const result = await pool.query(query, [league.id, league.start_date, league.end_date]);
+    res.json({ season_year: league.season_year, data: result.rows });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Server error' });
@@ -614,27 +636,54 @@ app.listen(port, () => {
   console.log('Starting HR fetch cron service...');
   
   // Function to run HR fetch
-  const runHRFetch = async () => {
+  const runHRFetch = async (fullSync = false) => {
     const now = new Date();
-    console.log(`[${now.toISOString()}] Running HR fetch...`);
-    
+    console.log(`[${now.toISOString()}] Running HR fetch (${fullSync ? 'full' : 'recent'})...`);
+
     try {
-      // Get all season data from opening day to today
-      const openingDay = '2025-03-27';  // Season start
+      // Get active league dates from DB
+      const leagueResult = await pool.query(
+        `SELECT start_date, end_date, season_year FROM leagues ORDER BY season_year DESC LIMIT 1`
+      );
+      if (leagueResult.rows.length === 0) {
+        console.log('No league found, skipping HR fetch');
+        return;
+      }
+      const league = leagueResult.rows[0];
       const todayStr = new Date().toISOString().split('T')[0];
-      
-      await fetchHomeRuns(openingDay, todayStr);
+      // Postgres DATE columns come back as JS Date objects — format to YYYY-MM-DD
+      const leagueStart = new Date(league.start_date).toISOString().split('T')[0];
+      const leagueEnd = new Date(league.end_date).toISOString().split('T')[0];
+
+      // Check if we're within the season window
+      if (todayStr < leagueStart || todayStr > leagueEnd) {
+        console.log(`Outside season window (${leagueStart} to ${leagueEnd}), skipping HR fetch`);
+        return;
+      }
+
+      let startDate;
+      if (fullSync) {
+        startDate = leagueStart;
+      } else {
+        // Only fetch last 3 days for hourly updates
+        const threeDaysAgo = new Date();
+        threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
+        const threeDaysStr = threeDaysAgo.toISOString().split('T')[0];
+        startDate = threeDaysStr < leagueStart ? leagueStart : threeDaysStr;
+      }
+
+      await fetchHomeRuns(startDate, todayStr);
       console.log(`[${new Date().toISOString()}] HR fetch completed successfully`);
     } catch (error) {
       console.error(`[${new Date().toISOString()}] HR fetch error:`, error.message);
     }
   };
   
-  // Run once at startup
-  runHRFetch();
-  
-  // Schedule to run hourly
-  cron.schedule('0 * * * *', runHRFetch);
+  // Run full sync at startup to catch up
+  runHRFetch(true);
+
+  // Schedule hourly (recent days only)
+  cron.schedule('0 * * * *', () => runHRFetch(false));
   console.log('Cron service started. HR data will be fetched hourly.');
   
   // Full MLB data sync daily at 4am
