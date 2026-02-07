@@ -25,6 +25,7 @@ app.use('/api/team', require('./routes/teams'));
 app.use('/api/roster', require('./routes/roster'));
 app.use('/api/leagues', require('./routes/leagues'));
 app.use('/api/admin', require('./routes/admin'));
+app.use('/api/draft', require('./routes/draft'));
 
 // Keep /api/race as a convenience alias (frontend uses this)
 const leaguesRouter = require('./routes/leagues');

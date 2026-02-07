@@ -164,6 +164,54 @@ CREATE TABLE public.user_teams (
 CREATE SEQUENCE public.user_teams_id_seq AS integer START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1;
 ALTER SEQUENCE public.user_teams_id_seq OWNED BY public.user_teams.id;
 
+--
+-- drafts: Draft configuration per league.
+--
+CREATE TABLE public.drafts (
+    id integer NOT NULL,
+    league_id integer NOT NULL,
+    status character varying(20) NOT NULL DEFAULT 'setup',
+    draft_type character varying(20) NOT NULL DEFAULT 'snake',
+    rounds integer NOT NULL DEFAULT 11,
+    current_pick integer DEFAULT 1,
+    created_at timestamp with time zone DEFAULT now(),
+    updated_at timestamp with time zone DEFAULT now()
+);
+
+CREATE SEQUENCE public.drafts_id_seq AS integer START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1;
+ALTER SEQUENCE public.drafts_id_seq OWNED BY public.drafts.id;
+
+--
+-- draft_order: Team pick positions within a draft.
+--
+CREATE TABLE public.draft_order (
+    id integer NOT NULL,
+    draft_id integer NOT NULL,
+    team_id integer NOT NULL,
+    order_position integer NOT NULL
+);
+
+CREATE SEQUENCE public.draft_order_id_seq AS integer START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1;
+ALTER SEQUENCE public.draft_order_id_seq OWNED BY public.draft_order.id;
+
+--
+-- draft_picks: Individual picks in a draft.
+--
+CREATE TABLE public.draft_picks (
+    id integer NOT NULL,
+    draft_id integer NOT NULL,
+    pick_number integer NOT NULL,
+    round integer NOT NULL,
+    team_id integer NOT NULL,
+    player_id integer,
+    position character varying(10),
+    picked_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now()
+);
+
+CREATE SEQUENCE public.draft_picks_id_seq AS integer START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1;
+ALTER SEQUENCE public.draft_picks_id_seq OWNED BY public.draft_picks.id;
+
 -- ============================================================================
 -- DEFAULTS (sequence assignments)
 -- ============================================================================
@@ -176,6 +224,9 @@ ALTER TABLE ONLY public.roster_templates ALTER COLUMN id SET DEFAULT nextval('pu
 ALTER TABLE ONLY public.scores ALTER COLUMN id SET DEFAULT nextval('public.scores_id_seq'::regclass);
 ALTER TABLE ONLY public.users ALTER COLUMN id SET DEFAULT nextval('public.users_id_seq'::regclass);
 ALTER TABLE ONLY public.user_teams ALTER COLUMN id SET DEFAULT nextval('public.user_teams_id_seq'::regclass);
+ALTER TABLE ONLY public.drafts ALTER COLUMN id SET DEFAULT nextval('public.drafts_id_seq'::regclass);
+ALTER TABLE ONLY public.draft_order ALTER COLUMN id SET DEFAULT nextval('public.draft_order_id_seq'::regclass);
+ALTER TABLE ONLY public.draft_picks ALTER COLUMN id SET DEFAULT nextval('public.draft_picks_id_seq'::regclass);
 
 -- ============================================================================
 -- PRIMARY KEYS
@@ -190,6 +241,9 @@ ALTER TABLE ONLY public.player_game_stats ADD CONSTRAINT player_game_stats_pkey 
 ALTER TABLE ONLY public.scores ADD CONSTRAINT scores_pkey PRIMARY KEY (id);
 ALTER TABLE ONLY public.users ADD CONSTRAINT users_pkey PRIMARY KEY (id);
 ALTER TABLE ONLY public.user_teams ADD CONSTRAINT user_teams_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY public.drafts ADD CONSTRAINT drafts_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY public.draft_order ADD CONSTRAINT draft_order_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY public.draft_picks ADD CONSTRAINT draft_picks_pkey PRIMARY KEY (id);
 
 -- ============================================================================
 -- UNIQUE CONSTRAINTS
@@ -198,6 +252,9 @@ ALTER TABLE ONLY public.user_teams ADD CONSTRAINT user_teams_pkey PRIMARY KEY (i
 ALTER TABLE ONLY public.players ADD CONSTRAINT players_mlb_id_key UNIQUE (mlb_id);
 ALTER TABLE ONLY public.users ADD CONSTRAINT users_email_key UNIQUE (email);
 ALTER TABLE ONLY public.user_teams ADD CONSTRAINT user_teams_user_id_team_id_key UNIQUE (user_id, team_id);
+ALTER TABLE ONLY public.draft_order ADD CONSTRAINT draft_order_draft_team_key UNIQUE (draft_id, team_id);
+ALTER TABLE ONLY public.draft_order ADD CONSTRAINT draft_order_draft_position_key UNIQUE (draft_id, order_position);
+ALTER TABLE ONLY public.draft_picks ADD CONSTRAINT draft_picks_draft_pick_key UNIQUE (draft_id, pick_number);
 
 -- ============================================================================
 -- INDEXES
@@ -209,6 +266,8 @@ CREATE INDEX idx_team_rosters_effective_date ON public.team_rosters USING btree 
 CREATE INDEX idx_users_email ON public.users USING btree (email);
 CREATE INDEX idx_user_teams_user_id ON public.user_teams USING btree (user_id);
 CREATE INDEX idx_user_teams_team_id ON public.user_teams USING btree (team_id);
+CREATE INDEX idx_draft_picks_draft_id ON public.draft_picks USING btree (draft_id);
+CREATE INDEX idx_draft_order_draft_id ON public.draft_order USING btree (draft_id);
 
 -- ============================================================================
 -- FOREIGN KEYS
@@ -223,3 +282,9 @@ ALTER TABLE ONLY public.scores ADD CONSTRAINT scores_team_id_fkey FOREIGN KEY (t
 ALTER TABLE ONLY public.user_teams ADD CONSTRAINT user_teams_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id);
 ALTER TABLE ONLY public.user_teams ADD CONSTRAINT user_teams_team_id_fkey FOREIGN KEY (team_id) REFERENCES public.teams(id);
 ALTER TABLE ONLY public.user_teams ADD CONSTRAINT user_teams_league_id_fkey FOREIGN KEY (league_id) REFERENCES public.leagues(id);
+ALTER TABLE ONLY public.drafts ADD CONSTRAINT drafts_league_id_fkey FOREIGN KEY (league_id) REFERENCES public.leagues(id);
+ALTER TABLE ONLY public.draft_order ADD CONSTRAINT draft_order_draft_id_fkey FOREIGN KEY (draft_id) REFERENCES public.drafts(id);
+ALTER TABLE ONLY public.draft_order ADD CONSTRAINT draft_order_team_id_fkey FOREIGN KEY (team_id) REFERENCES public.teams(id);
+ALTER TABLE ONLY public.draft_picks ADD CONSTRAINT draft_picks_draft_id_fkey FOREIGN KEY (draft_id) REFERENCES public.drafts(id);
+ALTER TABLE ONLY public.draft_picks ADD CONSTRAINT draft_picks_team_id_fkey FOREIGN KEY (team_id) REFERENCES public.teams(id);
+ALTER TABLE ONLY public.draft_picks ADD CONSTRAINT draft_picks_player_id_fkey FOREIGN KEY (player_id) REFERENCES public.players(id);
