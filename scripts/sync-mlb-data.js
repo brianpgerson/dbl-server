@@ -89,7 +89,27 @@ async function syncMlbData() {
           );
         }
       }
-      
+
+      // 3. Mark players not on any 40-man roster as inactive
+      const inactiveResult = await client.query(
+        `UPDATE players SET status = 'Inactive', updated_at = NOW()
+         WHERE mlb_id NOT IN (SELECT unnest($1::int[])) AND status = 'Active'`,
+        [Array.from(activeMlbIds)]
+      );
+      if (inactiveResult.rowCount > 0) {
+        console.log(`Marked ${inactiveResult.rowCount} players as inactive`);
+      }
+
+      // 4. Re-activate players that are back on a roster
+      const reactivateResult = await client.query(
+        `UPDATE players SET status = 'Active', updated_at = NOW()
+         WHERE mlb_id IN (SELECT unnest($1::int[])) AND status = 'Inactive'`,
+        [Array.from(activeMlbIds)]
+      );
+      if (reactivateResult.rowCount > 0) {
+        console.log(`Reactivated ${reactivateResult.rowCount} players`);
+      }
+
       await client.query('COMMIT');
       console.log('MLB data sync complete!');
     } catch (error) {

@@ -466,7 +466,7 @@ router.post('/sync-hrs', authenticateToken, async (req, res) => {
 // Get available players (not yet drafted in this draft)
 router.get('/:draftId/available', async (req, res) => {
   const pool = req.app.get('pool');
-  const { q, position } = req.query;
+  const { q, position, active_only } = req.query;
 
   try {
     let query = `
@@ -477,6 +477,11 @@ router.get('/:draftId/available', async (req, res) => {
       )
     `;
     const params = [req.params.draftId];
+
+    // Default to active only, unless explicitly set to false
+    if (active_only !== 'false') {
+      query += ` AND p.status = 'Active'`;
+    }
 
     if (q && q.length >= 2) {
       params.push(`%${q}%`);
