@@ -347,13 +347,13 @@ router.post('/:draftId/undo', authenticateToken, async (req, res) => {
   }
 });
 
-// Edit the position on an existing pick (for OF shuffles, etc.)
+// Edit an existing pick (change position and/or player)
 router.put('/:draftId/pick/:pickNumber', authenticateToken, async (req, res) => {
   const pool = req.app.get('pool');
-  const { position } = req.body;
+  const { position, player_id } = req.body;
 
-  if (!position) {
-    return res.status(400).json({ error: 'position required' });
+  if (!position && !player_id) {
+    return res.status(400).json({ error: 'position or player_id required' });
   }
 
   const client = await pool.connect();
@@ -363,47 +363,83 @@ router.put('/:draftId/pick/:pickNumber', authenticateToken, async (req, res) => 
     const draftId = req.params.draftId;
     const pickNumber = req.params.pickNumber;
 
-    // Get the pick
     const pickResult = await client.query(
       'SELECT * FROM draft_picks WHERE draft_id = $1 AND pick_number = $2',
       [draftId, pickNumber]
     );
     if (pickResult.rows.length === 0) throw new Error('Pick not found');
     const pick = pickResult.rows[0];
-
     if (!pick.player_id) throw new Error('Cannot edit an empty pick');
 
-    const oldPosition = pick.position;
+    const newPosition = position || pick.position;
+    const newPlayerId = player_id || pick.player_id;
 
-    // Update the draft pick position
+    // If changing player, check the new player isn't already drafted
+    if (player_id && player_id !== pick.player_id) {
+      const alreadyDrafted = await client.query(
+        'SELECT id FROM draft_picks WHERE draft_id = $1 AND player_id = $2',
+        [draftId, player_id]
+      );
+      if (alreadyDrafted.rows.length > 0) {
+        throw new Error('That player has already been drafted');
+      }
+    }
+
+    // Update the draft pick
     await client.query(
-      'UPDATE draft_picks SET position = $1 WHERE id = $2',
-      [position, pick.id]
+      'UPDATE draft_picks SET position = $1, player_id = $2 WHERE id = $3',
+      [newPosition, newPlayerId, pick.id]
     );
 
-    // Update the corresponding roster entry
-    const rosterStatus = position === 'BEN' ? 'BENCH' : 'STARTER';
+    // Update the roster entry — remove old, add new
     await client.query(
-      `UPDATE team_rosters SET position = $1, drafted_position = $1, status = $2
-       WHERE team_id = $3 AND player_id = $4 AND reason = 'DRAFTED'`,
-      [position, rosterStatus, pick.team_id, pick.player_id]
+      "DELETE FROM team_rosters WHERE team_id = $1 AND player_id = $2 AND reason = 'DRAFTED'",
+      [pick.team_id, pick.player_id]
+    );
+    const rosterStatus = newPosition === 'BEN' ? 'BENCH' : 'STARTER';
+    const today = new Date().toISOString().split('T')[0];
+    await client.query(
+      `INSERT INTO team_rosters (team_id, player_id, position, drafted_position, status, reason, effective_date)
+       VALUES ($1, $2, $3, $3, $4, 'DRAFTED', $5)`,
+      [pick.team_id, newPlayerId, newPosition, rosterStatus, today]
     );
 
     await client.query('COMMIT');
 
-    const playerResult = await pool.query('SELECT name FROM players WHERE id = $1', [pick.player_id]);
+    const playerResult = await pool.query('SELECT name FROM players WHERE id = $1', [newPlayerId]);
+    const oldPlayerResult = player_id && player_id !== pick.player_id
+      ? await pool.query('SELECT name FROM players WHERE id = $1', [pick.player_id])
+      : null;
 
-    res.json({
-      success: true,
-      message: `${playerResult.rows[0]?.name}: ${oldPosition} → ${position}`,
-      pick: { pick_number: parseInt(pickNumber, 10), position }
-    });
+    let message = '';
+    if (oldPlayerResult) {
+      message = `Pick #${pickNumber}: ${oldPlayerResult.rows[0]?.name} → ${playerResult.rows[0]?.name} (${newPosition})`;
+    } else {
+      message = `${playerResult.rows[0]?.name}: ${pick.position} → ${newPosition}`;
+    }
+
+    res.json({ success: true, message, pick: { pick_number: parseInt(pickNumber, 10), position: newPosition } });
   } catch (err) {
     await client.query('ROLLBACK');
     console.error(err);
     res.status(400).json({ error: err.message });
   } finally {
     client.release();
+  }
+});
+
+// Get filled positions for the team currently on the clock
+router.get('/:draftId/filled-positions/:teamId', async (req, res) => {
+  const pool = req.app.get('pool');
+  try {
+    const result = await pool.query(
+      'SELECT position FROM draft_picks WHERE draft_id = $1 AND team_id = $2 AND player_id IS NOT NULL',
+      [req.params.draftId, req.params.teamId]
+    );
+    res.json(result.rows.map(r => r.position));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
   }
 });
 
