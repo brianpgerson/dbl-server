@@ -49,6 +49,25 @@ router.get('/', async (req, res) => {
       state = 'preseason';
     }
 
+    // Check if there's a platform season available that this league hasn't created a season for yet
+    let nextPlatformSeason = null;
+    if (state === 'offseason') {
+      const platformResult = await pool.query(
+        `SELECT * FROM platform_seasons
+         WHERE year > $1 AND open_date <= $2
+         ORDER BY year ASC LIMIT 1`,
+        [latestSeason.season_year, today]
+      );
+      if (platformResult.rows.length > 0) {
+        const ps = platformResult.rows[0];
+        nextPlatformSeason = {
+          year: ps.year,
+          start_date: formatDate(ps.start_date),
+          end_date: formatDate(ps.end_date)
+        };
+      }
+    }
+
     res.json({
       state,
       season: {
@@ -68,7 +87,8 @@ router.get('/', async (req, res) => {
         id: draft.id,
         status: draft.status,
         current_pick: draft.current_pick
-      } : null
+      } : null,
+      next_platform_season: nextPlatformSeason
     });
   } catch (err) {
     console.error(err);
