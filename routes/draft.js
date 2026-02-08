@@ -347,6 +347,66 @@ router.post('/:draftId/undo', authenticateToken, async (req, res) => {
   }
 });
 
+// Edit the position on an existing pick (for OF shuffles, etc.)
+router.put('/:draftId/pick/:pickNumber', authenticateToken, async (req, res) => {
+  const pool = req.app.get('pool');
+  const { position } = req.body;
+
+  if (!position) {
+    return res.status(400).json({ error: 'position required' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const draftId = req.params.draftId;
+    const pickNumber = req.params.pickNumber;
+
+    // Get the pick
+    const pickResult = await client.query(
+      'SELECT * FROM draft_picks WHERE draft_id = $1 AND pick_number = $2',
+      [draftId, pickNumber]
+    );
+    if (pickResult.rows.length === 0) throw new Error('Pick not found');
+    const pick = pickResult.rows[0];
+
+    if (!pick.player_id) throw new Error('Cannot edit an empty pick');
+
+    const oldPosition = pick.position;
+
+    // Update the draft pick position
+    await client.query(
+      'UPDATE draft_picks SET position = $1 WHERE id = $2',
+      [position, pick.id]
+    );
+
+    // Update the corresponding roster entry
+    const rosterStatus = position === 'BEN' ? 'BENCH' : 'STARTER';
+    await client.query(
+      `UPDATE team_rosters SET position = $1, drafted_position = $1, status = $2
+       WHERE team_id = $3 AND player_id = $4 AND reason = 'DRAFTED'`,
+      [position, rosterStatus, pick.team_id, pick.player_id]
+    );
+
+    await client.query('COMMIT');
+
+    const playerResult = await pool.query('SELECT name FROM players WHERE id = $1', [pick.player_id]);
+
+    res.json({
+      success: true,
+      message: `${playerResult.rows[0]?.name}: ${oldPosition} → ${position}`,
+      pick: { pick_number: parseInt(pickNumber, 10), position }
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error(err);
+    res.status(400).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
 // Get available players (not yet drafted in this draft)
 router.get('/:draftId/available', async (req, res) => {
   const pool = req.app.get('pool');
