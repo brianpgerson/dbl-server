@@ -31,7 +31,7 @@ describe('authenticateToken', () => {
   });
 
   test('calls next() with valid token and sets req.user', async () => {
-    const payload = { userId: 1, email: 'test@test.com', teamIds: [1], commissionerLeagues: [] };
+    const payload = { userId: 1, email: 'test@test.com', teamIds: [1], commissionerLeagueIds: [] };
     const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '1h' });
     req.headers['authorization'] = `Bearer ${token}`;
 

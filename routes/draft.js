@@ -8,12 +8,12 @@ const router = express.Router();
 // ============================================================================
 
 // Get draft status and board for a league
-router.get('/league/:leagueId', async (req, res) => {
+router.get('/season/:seasonId', async (req, res) => {
   const pool = req.app.get('pool');
   try {
     const draftResult = await pool.query(
-      'SELECT * FROM drafts WHERE league_id = $1 ORDER BY created_at DESC LIMIT 1',
-      [req.params.leagueId]
+      'SELECT * FROM drafts WHERE season_id = $1 ORDER BY created_at DESC LIMIT 1',
+      [req.params.seasonId]
     );
 
     if (draftResult.rows.length === 0) {
@@ -24,11 +24,11 @@ router.get('/league/:leagueId', async (req, res) => {
 
     // Get draft order
     const orderResult = await pool.query(`
-      SELECT do.order_position, do.team_id, t.name as team_name, t.manager_name
-      FROM draft_order do
-      JOIN teams t ON do.team_id = t.id
-      WHERE do.draft_id = $1
-      ORDER BY do.order_position
+      SELECT dro.order_position, dro.team_id, t.name as team_name, t.manager_name
+      FROM draft_order dro
+      JOIN teams t ON dro.team_id = t.id
+      WHERE dro.draft_id = $1
+      ORDER BY dro.order_position
     `, [draft.id]);
 
     // Get all picks (made and pending)
@@ -78,16 +78,16 @@ router.get('/league/:leagueId', async (req, res) => {
 // Create a new draft
 router.post('/', authenticateToken, async (req, res) => {
   const pool = req.app.get('pool');
-  const { league_id, draft_type, rounds } = req.body;
+  const { season_id, draft_type, rounds } = req.body;
 
-  if (!league_id) {
-    return res.status(400).json({ error: 'league_id required' });
+  if (!season_id) {
+    return res.status(400).json({ error: 'season_id required' });
   }
 
   try {
     const result = await pool.query(
-      'INSERT INTO drafts (league_id, draft_type, rounds) VALUES ($1, $2, $3) RETURNING *',
-      [league_id, draft_type || 'snake', rounds || 11]
+      'INSERT INTO drafts (season_id, draft_type, rounds) VALUES ($1, $2, $3) RETURNING *',
+      [season_id, draft_type || 'snake', rounds || 11]
     );
     res.json({ success: true, draft: result.rows[0] });
   } catch (err) {
@@ -404,6 +404,62 @@ router.put('/:draftId/pick/:pickNumber', authenticateToken, async (req, res) => 
     res.status(400).json({ error: err.message });
   } finally {
     client.release();
+  }
+});
+
+// Cancel/delete a draft entirely (reset to pre-draft state)
+router.delete('/:draftId', authenticateToken, async (req, res) => {
+  const pool = req.app.get('pool');
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+    const draftId = req.params.draftId;
+
+    // Remove roster entries created by this draft
+    await client.query(
+      `DELETE FROM team_rosters WHERE reason = 'DRAFTED' AND player_id IN (
+        SELECT player_id FROM draft_picks WHERE draft_id = $1 AND player_id IS NOT NULL
+      )`,
+      [draftId]
+    );
+
+    // Delete picks and order
+    await client.query('DELETE FROM draft_picks WHERE draft_id = $1', [draftId]);
+    await client.query('DELETE FROM draft_order WHERE draft_id = $1', [draftId]);
+    await client.query('DELETE FROM drafts WHERE id = $1', [draftId]);
+
+    await client.query('COMMIT');
+    res.json({ success: true, message: 'Draft cancelled and reset' });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// Trigger manual HR sync
+router.post('/sync-hrs', authenticateToken, async (req, res) => {
+  try {
+    const fetchHomeRuns = require('../scripts/fetch-home-runs');
+    const { getActiveLeague, formatDate } = require('../helpers/league');
+    const pool = req.app.get('pool');
+    const league = await getActiveLeague(pool);
+    if (!league) return res.status(404).json({ error: 'No active league' });
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    const leagueStart = formatDate(league.start_date);
+    const threeDaysAgo = new Date();
+    threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
+    const startDate = threeDaysAgo.toISOString().split('T')[0] < leagueStart ? leagueStart : threeDaysAgo.toISOString().split('T')[0];
+
+    await fetchHomeRuns(startDate, todayStr);
+    res.json({ success: true, message: `HR sync complete (${startDate} to ${todayStr})` });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
   }
 });
 

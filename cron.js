@@ -2,7 +2,7 @@ const cron = require('node-cron');
 const fetchHomeRuns = require('./scripts/fetch-home-runs');
 const syncMlbData = require('./scripts/sync-mlb-data');
 const syncPlayerStatus = require('./scripts/sync-player-status');
-const { formatDate } = require('./helpers/league');
+const { getActiveSeason, formatDate } = require('./helpers/league');
 
 function startCronJobs(pool) {
   console.log('Starting cron services...');
@@ -12,17 +12,14 @@ function startCronJobs(pool) {
     console.log(`[${now.toISOString()}] Running HR fetch (${fullSync ? 'full' : 'recent'})...`);
 
     try {
-      const leagueResult = await pool.query(
-        'SELECT start_date, end_date, season_year FROM leagues ORDER BY season_year DESC LIMIT 1'
-      );
-      if (leagueResult.rows.length === 0) {
-        console.log('No league found, skipping HR fetch');
+      const season = await getActiveSeason(pool);
+      if (!season) {
+        console.log('No season found, skipping HR fetch');
         return;
       }
-      const league = leagueResult.rows[0];
       const todayStr = new Date().toISOString().split('T')[0];
-      const leagueStart = formatDate(league.start_date);
-      const leagueEnd = formatDate(league.end_date);
+      const leagueStart = formatDate(season.start_date);
+      const leagueEnd = formatDate(season.end_date);
 
       if (todayStr < leagueStart || todayStr > leagueEnd) {
         console.log(`Outside season window (${leagueStart} to ${leagueEnd}), skipping HR fetch`);

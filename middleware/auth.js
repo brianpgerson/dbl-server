@@ -29,10 +29,14 @@ const requireTeamAccess = async (req, res, next) => {
   const canManageTeam = req.user.teamIds.includes(teamId);
 
   let canCommissionTeam = false;
-  if (!canManageTeam && req.user.commissionerLeagues.length > 0) {
-    const result = await pool.query('SELECT league_id FROM teams WHERE id = $1', [teamId]);
+  if (!canManageTeam && req.user.commissionerLeagueIds.length > 0) {
+    // Get the team's league via season
+    const result = await pool.query(
+      `SELECT s.league_id FROM teams t JOIN seasons s ON t.season_id = s.id WHERE t.id = $1`,
+      [teamId]
+    );
     if (result.rows.length > 0) {
-      canCommissionTeam = req.user.commissionerLeagues.includes(result.rows[0].league_id);
+      canCommissionTeam = req.user.commissionerLeagueIds.includes(result.rows[0].league_id);
     }
   }
 

@@ -123,10 +123,12 @@ router.post('/swap', authenticateToken, async (req, res) => {
   // Check authorization
   const canManageTeam = req.user.teamIds.includes(team);
   let canCommissionTeam = false;
-  if (!canManageTeam && req.user.commissionerLeagues.length > 0) {
-    const teamLeagueResult = await pool.query('SELECT league_id FROM teams WHERE id = $1', [team]);
+  if (!canManageTeam && req.user.commissionerLeagueIds && req.user.commissionerLeagueIds.length > 0) {
+    const teamLeagueResult = await pool.query(
+      'SELECT s.league_id FROM teams t JOIN seasons s ON t.season_id = s.id WHERE t.id = $1', [team]
+    );
     if (teamLeagueResult.rows.length > 0) {
-      canCommissionTeam = req.user.commissionerLeagues.includes(teamLeagueResult.rows[0].league_id);
+      canCommissionTeam = req.user.commissionerLeagueIds.includes(teamLeagueResult.rows[0].league_id);
     }
   }
   if (!canManageTeam && !canCommissionTeam) {

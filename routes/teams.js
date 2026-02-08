@@ -1,22 +1,32 @@
 const express = require('express');
 const { getTodaysGameData } = require('../helpers/mlb');
+const { getActiveSeason } = require('../helpers/league');
 
 const router = express.Router();
 
-// Get all teams (optionally filter by league_id)
+// Get all teams (optionally filter by season_id)
 router.get('/', async (req, res) => {
   const pool = req.app.get('pool');
   try {
     let query, params;
-    if (req.query.league_id) {
-      query = `SELECT id, name, manager_name, league_id FROM teams WHERE league_id = $1 ORDER BY name`;
+    if (req.query.season_id) {
+      query = `SELECT t.id, t.name, t.manager_name, t.season_id, s.league_id
+               FROM teams t JOIN seasons s ON t.season_id = s.id
+               WHERE t.season_id = $1 ORDER BY t.name`;
+      params = [req.query.season_id];
+    } else if (req.query.league_id) {
+      // Convenience: get teams for the most recent season of a league
+      query = `SELECT t.id, t.name, t.manager_name, t.season_id, s.league_id
+               FROM teams t JOIN seasons s ON t.season_id = s.id
+               WHERE s.league_id = $1
+               ORDER BY s.season_year DESC, t.name`;
       params = [req.query.league_id];
     } else {
-      query = `
-        SELECT id, name, manager_name, league_id FROM teams
-        WHERE league_id = (SELECT id FROM leagues ORDER BY season_year DESC LIMIT 1)
-        ORDER BY name
-      `;
+      // Default: return teams from the most recent season
+      query = `SELECT t.id, t.name, t.manager_name, t.season_id, s.league_id
+               FROM teams t JOIN seasons s ON t.season_id = s.id
+               WHERE t.season_id = (SELECT id FROM seasons ORDER BY season_year DESC LIMIT 1)
+               ORDER BY t.name`;
       params = [];
     }
     const result = await pool.query(query, params);
@@ -69,15 +79,12 @@ router.get('/:id/roster-with-hrs', async (req, res) => {
     `;
     const result = await pool.query(query, [req.params.id]);
 
-    // Get unique MLB team IDs from roster
     const uniqueTeamIds = [...new Set(result.rows
       .map(player => player.current_mlb_team_id)
       .filter(id => id !== null))];
 
-    // Fetch today's game data
     const gameData = await getTodaysGameData(uniqueTeamIds);
 
-    // Add game info to each player
     const rosterWithGames = result.rows.map(player => ({
       ...player,
       game_info: gameData[player.current_mlb_team_id]?.text || 'No game',
