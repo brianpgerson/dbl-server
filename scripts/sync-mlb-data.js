@@ -31,9 +31,10 @@ async function syncMlbData() {
       
       // Process all players on this team
       for (const player of roster) {
-        // Skip pitchers except Ohtani
-        if (player.person.id === 660271 || player.person.fullName.includes('Ohtani') || 
-            !['P', 'TWP', 'RP', 'SP'].includes(player.position.code)) {
+        // Skip pitchers (code=1) except Ohtani (two-way player)
+        const isPitcher = player.position.code === '1' || player.position.type === 'Pitcher';
+        const isOhtani = player.person.id === 660271 || player.position.code === 'Y';
+        if (!isPitcher || isOhtani) {
           
           const mlbId = player.person.id;
           activeMlbIds.add(mlbId);

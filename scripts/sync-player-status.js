@@ -26,22 +26,24 @@ async function syncPlayerStatus() {
         const response = await axios.get(rosterUrl);
         
         for (const player of response.data.roster) {
+          // Skip pitchers — they're marked Inactive by sync-mlb-data
+          const isPitcher = player.position?.code === '1' || player.position?.type === 'Pitcher';
+          if (isPitcher && player.person.id !== 660271) continue;
+
           const mlbId = player.person.id;
           const statusDesc = player.status.description;
-          
+
           // Map MLB status descriptions to our simplified statuses
           let status = 'Active';
           if (statusDesc.includes('IL') || statusDesc.includes('Injured')) {
             status = 'IL';
-            console.log(`Found IL player: ${player.person.fullName} (${statusDesc})`);
           } else if (statusDesc === 'DTD' || statusDesc.toLowerCase().includes('day-to-day')) {
             status = 'DTD';
-            console.log(`Found DTD player: ${player.person.fullName} (${statusDesc})`);
           }
-          
-          // Update player status in database
+
+          // Update player status in database (only for non-Inactive players)
           const result = await pool.query(
-            'UPDATE players SET status = $1 WHERE mlb_id = $2 RETURNING *',
+            `UPDATE players SET status = $1 WHERE mlb_id = $2 AND status != 'Inactive' RETURNING *`,
             [status, mlbId]
           );
           

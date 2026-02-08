@@ -177,4 +177,19 @@ router.get('/seasons/:seasonId/race', async (req, res) => {
   }
 });
 
+// Get roster template for a season (public, read-only)
+router.get('/seasons/:seasonId/roster-template', async (req, res) => {
+  const pool = req.app.get('pool');
+  try {
+    const result = await pool.query(
+      'SELECT position, count FROM roster_templates WHERE season_id = $1 ORDER BY id',
+      [req.params.seasonId]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 module.exports = router;
