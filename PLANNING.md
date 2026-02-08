@@ -173,101 +173,116 @@ Rather than adding `season_year` columns to `scores`/`player_game_stats`, we cre
 - [x] Commissioner-only nav link (hidden for regular users)
 - [x] Success/error message feedback
 
-### Deferred
-- [ ] Data sync controls (manual trigger for HR fetch) — low priority, cron handles it
-- [ ] Score corrections — rare edge case, can do via DB for now
-- [ ] Season lifecycle (freeze rosters) — can handle via end_date
+---
+
+## Day 2 Work (2026-02-08)
+
+### Entity Restructure
+- [x] Added `seasons` table — separates league identity from per-year seasons
+- [x] Added `user_leagues` table — league-level roles (commissioner/manager)
+- [x] Added `platform_seasons` table — platform-wide season config (open_date, start_date, end_date)
+- [x] Teams, roster_templates, drafts now reference `season_id` instead of `league_id`
+- [x] `user_teams` simplified to just user_id + team_id (role moved to user_leagues)
+- [x] Migration: `migrations/add-seasons-entity.sql`, `migrations/add-platform-seasons.sql`
+
+### App State Machine
+- [x] `GET /api/status` — returns current state (offseason/preseason/drafting/season)
+- [x] Main page renders different views per state:
+  - **Offseason**: "Last Season (YYYY)" with final charts/results
+  - **Preseason**: "YYYY Season Starting Soon!" banner
+  - **Drafting**: "The Draft Is Live!" with link to draft board
+  - **Season**: HR race charts (normal view)
+- [x] `PageShell` component — shared layout with state-aware nav
+
+### Commissioner Admin Portal Redesign
+- [x] **Offseason mode**: One-click "Start YYYY Season" (auto-populates from platform_seasons)
+- [x] **Preseason mode**: Settings tab (league name, season dates, roster templates, users) + Start Draft tab
+- [x] **Draft mode**: Go to Draft Board + Cancel Draft buttons
+- [x] **Season mode**: Sync HR Data + View Draft Results
+
+### Draft System Improvements
+- [x] Two-step pick flow: select player → confirm (no accidental picks)
+- [x] Auto-position from MLB primary position (with fallback: natural pos → DH → BEN)
+- [x] Position buttons show filled/available based on roster template counts
+- [x] Filled positions tracked as dict `{ pos: count }` vs template slots
+- [x] Edit existing picks: change position AND/OR player
+- [x] `DELETE /api/draft/:id` — cancel/reset draft entirely
+- [x] Position filter dropdown in player search
+- [x] Active roster only toggle (default on)
+- [x] Snake draft board grid fixed — picks mapped to correct team columns
+- [x] "Back to Home" button on draft completion
+- [x] Public roster template endpoint (no auth needed for draft board)
+
+### Player Data Fixes
+- [x] Fixed pitcher filtering — MLB API uses numeric code `'1'`, not letter `'P'`
+- [x] Fixed `sync-player-status.js` — now skips pitchers, respects `Inactive` status
+- [x] Players marked `Inactive` when not on any 40-man roster
+- [x] Draft search defaults to active players with toggle to include inactive
+- [x] Position codes display as human-readable labels (2→C, 7→LF, etc.)
 
 ---
 
-## Priority 5: Draft System
+## Remaining Work / TODOs
 
-### Context
-League drafts via text message (group chat). Commissioner manually inputs picks. Previously used a spreadsheet — this year we want it in-app.
+### Pre-Deploy (Must Do)
+- [ ] Run all migrations on Heroku production DB (`add-draft-tables.sql`, `add-seasons-entity.sql`, `add-platform-seasons.sql`)
+- [ ] Push both repos to production
+- [ ] Set up production `platform_seasons` row for 2026
+- [ ] Create production users and team assignments for 2026 season
+- [ ] Test full flow end-to-end on production
 
-### Schema — DONE
-- [x] `drafts` table — league_id, status (setup/active/complete), draft_type (snake/straight), rounds, current_pick
-- [x] `draft_picks` table — draft_id, pick_number, round, team_id, player_id, position, picked_at
-- [x] `draft_order` table — draft_id, team_id, order_position
-- [x] Migration file: `migrations/add-draft-tables.sql`
+### Nice to Have
+- [ ] CRA → Vite migration (fixes frontend tests, improves build speed)
+- [ ] Switch `<a href>` to React Router `<Link>` (prevents full page reloads)
+- [ ] Error Boundary component
+- [ ] Manager email invites (SendGrid/SES integration)
+- [ ] Mobile-optimized draft board (card layout vs grid)
+- [ ] Real-time draft updates (WebSocket/SSE vs polling)
+- [ ] Team color persistence across seasons
 
-### Backend API — DONE
-- [x] `GET /api/draft/league/:leagueId` — get draft status, order, all picks, who's on the clock
-- [x] `POST /api/draft` — create a new draft (commissioner)
-- [x] `POST /api/draft/:id/order` — set draft order + auto-generate pick slots (supports snake/straight)
-- [x] `POST /api/draft/:id/start` — activate the draft
-- [x] `POST /api/draft/:id/pick` — make a pick (auto-creates team_roster entry with reason='DRAFTED')
-- [x] `POST /api/draft/:id/undo` — undo the last pick (removes roster entry too)
-- [x] `GET /api/draft/:id/available` — search available (undrafted) players
-
-### Frontend — DONE
-- [x] `/draft/:leagueId` route with `DraftBoard` component
-- [x] Live draft board with grid showing all picks by round
-- [x] "On the clock" indicator with team name and pick number
-- [x] Commissioner controls: position selector, player search, pick submission
-- [x] Undo last pick button
-- [x] Auto-polling every 10 seconds for live updates
-- [x] Draft setup tab in Admin portal: league selection, draft order reordering, create/start draft
-- [x] Link from admin to draft board
+### Draft Order Minigame (P6)
+- [ ] Design the minigame concept
+- [ ] Build it!
 
 ---
 
-## Priority 6: Draft Order Minigame
+## Architecture (Current)
 
-### Context
-Fun minigame for league members to determine draft order. Lowest priority — details TBD.
-
----
-
-## Architecture Notes (Updated Post-Refactor)
-
-### Current Stack
-- **Backend:** Node.js/Express, modular routes (`server.js` is 44 lines), Heroku deployment
-- **Frontend:** Create React App with React Router, custom hooks, deployed to dong-bong-league.com
-- **Database:** Heroku Postgres essential-0 (1 GB limit, currently 11.6 MB, 12 tables)
-- **External API:** MLB Stats API (statsapi.mlb.com) for game data and player info
-- **Auth:** JWT-based, tokens stored in localStorage, 7-day expiry with client-side expiry check
+### Entity Hierarchy
+```
+Platform
+├── platform_seasons (year, open_date, start_date, end_date)
+│
+└── League (Dong Bong League)
+    ├── user_leagues (commissioner/manager roles)
+    │
+    └── Season (2025, 2026, ...)
+        ├── teams → team_rosters, scores
+        ├── roster_templates
+        ├── drafts → draft_order, draft_picks
+        └── user_teams (team assignments per season)
+```
 
 ### Backend Structure
 ```
-server.js (44 lines - entry point)
+server.js (entry point)
 ├── routes/auth.js      - login
 ├── routes/teams.js     - team data, roster-with-hrs
 ├── routes/roster.js    - roster moves, swaps
-├── routes/leagues.js   - league list, race data, history
-├── routes/admin.js     - commissioner: season setup, user/team mgmt
-├── routes/draft.js     - draft board, picks, order
+├── routes/leagues.js   - leagues, seasons, race data, history, roster templates
+├── routes/admin.js     - commissioner: season/team/user management
+├── routes/draft.js     - draft board, picks, order, cancel, edit
+├── routes/status.js    - app state machine
 ├── middleware/auth.js   - JWT validation, team access checks
 ├── helpers/mlb.js      - team abbreviations, game data
-├── helpers/league.js   - active league queries
+├── helpers/league.js   - active season queries
 ├── cron.js             - HR fetch, MLB sync, player status
 └── scripts/            - fetch-home-runs, sync-mlb-data, sync-player-status
 ```
 
-### Data Flow
+### App State Machine
 ```
-MLB Stats API  --(cron every hour)-->  player_game_stats
-                                            |
-team_rosters (who's on which team)  ------->|
-                                            v
-                                    scoring engine --> scores
-                                            |
-                                            v
-                                    /api/race --> frontend charts
+Offseason ──(create season)──> Preseason ──(start draft)──> Drafting ──(complete)──> Season
+    ^                                                                                  │
+    └──────────────────────────────(season end_date passes)─────────────────────────────┘
 ```
-
----
-
-## Running Thoughts
-
-_Notes and ideas captured during the P1-P5 build-out:_
-
-- **CRA → Vite migration**: React 19's `act()` is incompatible with CRA's jest config. Frontend component tests are written but skipped. Migrating to Vite would fix this and improve dev/build speed. Worth doing before next season starts.
-- **Real-time draft updates**: Currently the draft board polls every 10 seconds. Could upgrade to WebSocket/SSE for instant updates during the draft, but polling is probably fine for a text-based draft with 8 people.
-- **Frontend nav**: The current nav uses `<a href>` tags (full page reload) instead of React Router `<Link>` components. This works but causes unnecessary reloads. Should switch to `<Link>` for SPA navigation.
-- **Team colors consistency**: The TEAM_COLORS array assigns colors by index position. If teams are reordered between seasons, colors will change. Could persist color assignments per team.
-- **Supabase cleanup**: Removed the dependency from the frontend, but the Supabase project still exists. Can delete the Supabase project entirely.
-- **Error boundary**: Still missing a React Error Boundary. Low priority but would prevent white-screen crashes.
-- **Player position flexibility**: The draft lets you assign any position to any player. The roster move logic enforces drafted_position rules. Should the draft also validate positions against primary_position?
-- **Production deployment**: Need to run `migrations/add-draft-tables.sql` on the Heroku DB before the draft can be used.
-- **Mobile UX**: The draft board grid is wide and requires horizontal scrolling on mobile. Could consider a card-based layout for mobile draft viewing.
