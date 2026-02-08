@@ -300,6 +300,72 @@ router.post('/new-season', async (req, res) => {
 });
 
 // ============================================================================
+// ROSTER TEMPLATES
+// ============================================================================
+
+router.get('/seasons/:seasonId/roster-templates', async (req, res) => {
+  const pool = req.app.get('pool');
+  try {
+    const result = await pool.query(
+      'SELECT id, position, count FROM roster_templates WHERE season_id = $1 ORDER BY id',
+      [req.params.seasonId]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+router.put('/seasons/:seasonId/roster-templates', async (req, res) => {
+  const pool = req.app.get('pool');
+  const { templates } = req.body; // Array of { position, count }
+
+  if (!templates || !Array.isArray(templates)) {
+    return res.status(400).json({ error: 'templates array required' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('DELETE FROM roster_templates WHERE season_id = $1', [req.params.seasonId]);
+    for (const t of templates) {
+      await client.query(
+        'INSERT INTO roster_templates (season_id, position, count) VALUES ($1, $2, $3)',
+        [req.params.seasonId, t.position, t.count]
+      );
+    }
+    await client.query('COMMIT');
+    res.json({ success: true });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// Update league name
+router.put('/leagues/:leagueId', async (req, res) => {
+  const pool = req.app.get('pool');
+  const { name } = req.body;
+  if (!name) return res.status(400).json({ error: 'name required' });
+
+  try {
+    const result = await pool.query(
+      'UPDATE leagues SET name = $1, updated_at = NOW() WHERE id = $2 RETURNING *',
+      [name, req.params.leagueId]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'League not found' });
+    res.json({ success: true, league: result.rows[0] });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================================
 // ROSTER AUDIT TRAIL
 // ============================================================================
 
