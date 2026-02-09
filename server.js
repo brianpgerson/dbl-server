@@ -26,6 +26,7 @@ app.use('/api/roster', require('./routes/roster'));
 app.use('/api/leagues', require('./routes/leagues'));
 app.use('/api/admin', require('./routes/admin'));
 app.use('/api/draft', require('./routes/draft'));
+app.use('/api/big-dongos', require('./routes/big-dongos'));
 app.use('/api/status', require('./routes/status'));
 
 // Keep /api/race as a convenience alias (frontend uses this)
