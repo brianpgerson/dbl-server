@@ -154,15 +154,18 @@ router.get('/users', async (req, res) => {
 
 router.post('/users', async (req, res) => {
   const pool = req.app.get('pool');
-  const { email, password } = req.body;
+  const { email, password, team_name } = req.body;
 
   if (!email || !password) {
     return res.status(400).json({ error: 'Email and password required' });
   }
 
+  const client = await pool.connect();
   try {
+    await client.query('BEGIN');
+
     const passwordHash = await bcrypt.hash(password, 10);
-    const result = await pool.query(
+    const result = await client.query(
       'INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id, email, created_at',
       [email.toLowerCase(), passwordHash]
     );
@@ -171,17 +174,41 @@ router.post('/users', async (req, res) => {
     // Auto-assign manager role in commissioner's league
     const leagueId = req.user.commissionerLeagueIds?.[0];
     if (leagueId) {
-      await pool.query(
+      await client.query(
         'INSERT INTO user_leagues (user_id, league_id, role) VALUES ($1, $2, $3)',
         [newUser.id, leagueId, 'manager']
       );
+
+      // Create team and assign user if team_name provided
+      if (team_name) {
+        // Find the most recent season for this league
+        const seasonResult = await client.query(
+          'SELECT id FROM seasons WHERE league_id = $1 ORDER BY season_year DESC LIMIT 1',
+          [leagueId]
+        );
+        if (seasonResult.rows.length > 0) {
+          const seasonId = seasonResult.rows[0].id;
+          const teamResult = await client.query(
+            'INSERT INTO teams (season_id, name, manager_name) VALUES ($1, $2, $3) RETURNING id',
+            [seasonId, team_name, email.split('@')[0]]
+          );
+          await client.query(
+            'INSERT INTO user_teams (user_id, team_id) VALUES ($1, $2)',
+            [newUser.id, teamResult.rows[0].id]
+          );
+        }
+      }
     }
 
+    await client.query('COMMIT');
     res.json({ success: true, user: newUser });
   } catch (err) {
+    await client.query('ROLLBACK');
     if (err.code === '23505') return res.status(409).json({ error: 'Email already exists' });
     console.error(err);
     res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
   }
 });
 
