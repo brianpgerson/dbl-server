@@ -3,7 +3,7 @@ const { authenticateToken } = require('../middleware/auth');
 
 const router = express.Router();
 
-const MAX_ATTEMPTS = 5;
+const MAX_ATTEMPTS = 1;
 const WARMUP_SWINGS = 5;
 const REAL_SWINGS = 5;
 const TOTAL_SWINGS = WARMUP_SWINGS + REAL_SWINGS;
@@ -19,18 +19,20 @@ router.get('/:seasonId/leaderboard', async (req, res) => {
       SELECT
         bds.user_id,
         u.email,
-        t.name as team_name,
-        t.manager_name,
+        MAX(t.name) as team_name,
+        MAX(t.manager_name) as manager_name,
         MAX(bds.distance_feet * 12 + bds.distance_inches) as best_distance_total_inches,
         COUNT(DISTINCT bds.attempt_number) as attempts_used
       FROM big_dongos_swings bds
       JOIN users u ON bds.user_id = u.id
       LEFT JOIN user_teams ut ON ut.user_id = u.id
-      LEFT JOIN teams t ON ut.team_id = t.id AND t.season_id = bds.season_id
+      LEFT JOIN teams t ON ut.team_id = t.id
+      LEFT JOIN seasons s ON t.season_id = s.id AND s.id = bds.season_id
       WHERE bds.season_id = $1
         AND bds.distance_feet > 0
         AND bds.is_warmup = false
-      GROUP BY bds.user_id, u.email, t.name, t.manager_name
+        AND (t.season_id = bds.season_id OR t.id IS NULL)
+      GROUP BY bds.user_id, u.email
       ORDER BY best_distance_total_inches DESC
     `, [req.params.seasonId]);
 
@@ -39,7 +41,7 @@ router.get('/:seasonId/leaderboard', async (req, res) => {
       user_id: row.user_id,
       email: row.email,
       team_name: row.team_name,
-      manager_name: row.manager_name,
+      manager_name: row.manager_name || row.email,
       best_distance_inches: row.best_distance_total_inches,
       attempts_used: parseInt(row.attempts_used)
     }));
