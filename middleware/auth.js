@@ -47,4 +47,38 @@ const requireTeamAccess = async (req, res, next) => {
   next();
 };
 
-module.exports = { authenticateToken, requireTeamAccess };
+const requireCommissioner = (req, res, next) => {
+  if (!req.user.commissionerLeagueIds || req.user.commissionerLeagueIds.length === 0) {
+    return res.status(403).json({ error: 'Commissioner access required' });
+  }
+  next();
+};
+
+// Throws if caller is not commissioner of the given league. Use inside route handlers
+// after resolving season_id/team_id/draft_id → league_id.
+const assertCommissionerOfLeague = (req, leagueId) => {
+  if (!req.user.commissionerLeagueIds.includes(leagueId)) {
+    const err = new Error('Not authorized for this league');
+    err.status = 403;
+    throw err;
+  }
+};
+
+// Resolve season → league_id and assert ownership. Works with pool or client.
+const assertCommissionerOfSeason = async (db, req, seasonId) => {
+  const r = await db.query('SELECT league_id FROM seasons WHERE id = $1', [seasonId]);
+  if (r.rows.length === 0) {
+    const err = new Error('Season not found');
+    err.status = 404;
+    throw err;
+  }
+  assertCommissionerOfLeague(req, r.rows[0].league_id);
+};
+
+module.exports = {
+  authenticateToken,
+  requireTeamAccess,
+  requireCommissioner,
+  assertCommissionerOfLeague,
+  assertCommissionerOfSeason,
+};

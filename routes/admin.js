@@ -1,20 +1,30 @@
 const express = require('express');
 const bcrypt = require('bcrypt');
-const { authenticateToken } = require('../middleware/auth');
+const {
+  authenticateToken,
+  requireCommissioner,
+  assertCommissionerOfLeague,
+  assertCommissionerOfSeason,
+} = require('../middleware/auth');
 
 const router = express.Router();
 
 router.use(authenticateToken);
-
-// Middleware: require commissioner role
-const requireCommissioner = (req, res, next) => {
-  if (!req.user.commissionerLeagueIds || req.user.commissionerLeagueIds.length === 0) {
-    return res.status(403).json({ error: 'Commissioner access required' });
-  }
-  next();
-};
-
 router.use(requireCommissioner);
+
+// Look up team → season → league, assert caller commissions that league
+async function assertCommissionerOfTeam(pool, req, teamId) {
+  const r = await pool.query(
+    'SELECT s.league_id FROM teams t JOIN seasons s ON t.season_id = s.id WHERE t.id = $1',
+    [teamId]
+  );
+  if (r.rows.length === 0) {
+    const err = new Error('Team not found');
+    err.status = 404;
+    throw err;
+  }
+  assertCommissionerOfLeague(req, r.rows[0].league_id);
+}
 
 // ============================================================================
 // SEASON MANAGEMENT
@@ -32,6 +42,8 @@ router.post('/seasons', async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+
+    assertCommissionerOfLeague(req, league_id);
 
     const seasonResult = await client.query(
       'INSERT INTO seasons (league_id, season_year, start_date, end_date) VALUES ($1, $2, $3, $4) RETURNING *',
@@ -57,7 +69,7 @@ router.post('/seasons', async (req, res) => {
   } catch (err) {
     await client.query('ROLLBACK');
     console.error(err);
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   } finally {
     client.release();
   }
@@ -69,15 +81,15 @@ router.put('/seasons/:id', async (req, res) => {
   const { start_date, end_date } = req.body;
 
   try {
+    await assertCommissionerOfSeason(pool, req, req.params.id);
     const result = await pool.query(
       'UPDATE seasons SET start_date = COALESCE($1, start_date), end_date = COALESCE($2, end_date), updated_at = NOW() WHERE id = $3 RETURNING *',
       [start_date, end_date, req.params.id]
     );
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Season not found' });
     res.json({ success: true, season: result.rows[0] });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -95,6 +107,7 @@ router.post('/teams', async (req, res) => {
   }
 
   try {
+    await assertCommissionerOfSeason(pool, req, season_id);
     const result = await pool.query(
       'INSERT INTO teams (season_id, name, manager_name) VALUES ($1, $2, $3) RETURNING *',
       [season_id, name, manager_name]
@@ -102,7 +115,7 @@ router.post('/teams', async (req, res) => {
     res.json({ success: true, team: result.rows[0] });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -112,15 +125,15 @@ router.put('/teams/:id', async (req, res) => {
   const { name, manager_name } = req.body;
 
   try {
+    await assertCommissionerOfTeam(pool, req, req.params.id);
     const result = await pool.query(
       'UPDATE teams SET name = COALESCE($1, name), manager_name = COALESCE($2, manager_name), updated_at = NOW() WHERE id = $3 RETURNING *',
       [name, manager_name, req.params.id]
     );
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Team not found' });
     res.json({ success: true, team: result.rows[0] });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -143,8 +156,10 @@ router.get('/users', async (req, res) => {
                 FROM user_teams ut JOIN teams t ON ut.team_id = t.id WHERE ut.user_id = u.id),
                '[]'::json
              ) as team_assignments
-      FROM users u ORDER BY u.email
-    `);
+      FROM users u
+      WHERE u.id IN (SELECT user_id FROM user_leagues WHERE league_id = ANY($1))
+      ORDER BY u.email
+    `, [req.user.commissionerLeagueIds]);
     res.json(result.rows);
   } catch (err) {
     console.error(err);
@@ -206,7 +221,7 @@ router.post('/users', async (req, res) => {
     await client.query('ROLLBACK');
     if (err.code === '23505') return res.status(409).json({ error: 'Email already exists' });
     console.error(err);
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   } finally {
     client.release();
   }
@@ -222,6 +237,7 @@ router.post('/user-teams', async (req, res) => {
   }
 
   try {
+    await assertCommissionerOfTeam(pool, req, team_id);
     const result = await pool.query(
       'INSERT INTO user_teams (user_id, team_id) VALUES ($1, $2) RETURNING *',
       [user_id, team_id]
@@ -230,7 +246,7 @@ router.post('/user-teams', async (req, res) => {
   } catch (err) {
     if (err.code === '23505') return res.status(409).json({ error: 'User already assigned to this team' });
     console.error(err);
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -244,6 +260,7 @@ router.post('/user-leagues', async (req, res) => {
   }
 
   try {
+    assertCommissionerOfLeague(req, league_id);
     const result = await pool.query(
       'INSERT INTO user_leagues (user_id, league_id, role) VALUES ($1, $2, $3) ON CONFLICT (user_id, league_id) DO UPDATE SET role = $3 RETURNING *',
       [user_id, league_id, role || 'manager']
@@ -251,7 +268,7 @@ router.post('/user-leagues', async (req, res) => {
     res.json({ success: true, assignment: result.rows[0] });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -270,6 +287,11 @@ router.post('/new-season', async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+
+    assertCommissionerOfLeague(req, league_id);
+    if (source_season_id) {
+      await assertCommissionerOfSeason(client, req, source_season_id);
+    }
 
     // 1. Create the season
     const seasonResult = await client.query(
@@ -331,7 +353,7 @@ router.post('/new-season', async (req, res) => {
   } catch (err) {
     await client.query('ROLLBACK');
     console.error(err);
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   } finally {
     client.release();
   }
@@ -366,6 +388,7 @@ router.put('/seasons/:seasonId/roster-templates', async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    await assertCommissionerOfSeason(client, req, req.params.seasonId);
     await client.query('DELETE FROM roster_templates WHERE season_id = $1', [req.params.seasonId]);
     for (const t of templates) {
       await client.query(
@@ -378,7 +401,7 @@ router.put('/seasons/:seasonId/roster-templates', async (req, res) => {
   } catch (err) {
     await client.query('ROLLBACK');
     console.error(err);
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   } finally {
     client.release();
   }
@@ -391,6 +414,7 @@ router.put('/leagues/:leagueId', async (req, res) => {
   if (!name) return res.status(400).json({ error: 'name required' });
 
   try {
+    assertCommissionerOfLeague(req, parseInt(req.params.leagueId, 10));
     const result = await pool.query(
       'UPDATE leagues SET name = $1, updated_at = NOW() WHERE id = $2 RETURNING *',
       [name, req.params.leagueId]
@@ -399,7 +423,7 @@ router.put('/leagues/:leagueId', async (req, res) => {
     res.json({ success: true, league: result.rows[0] });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -410,6 +434,7 @@ router.put('/leagues/:leagueId', async (req, res) => {
 router.get('/teams/:teamId/roster-history', async (req, res) => {
   const pool = req.app.get('pool');
   try {
+    await assertCommissionerOfTeam(pool, req, req.params.teamId);
     const result = await pool.query(`
       SELECT tr.id, tr.position, tr.drafted_position, tr.status, tr.reason,
         tr.effective_date, tr.end_date, p.name as player_name, p.primary_position
@@ -420,7 +445,7 @@ router.get('/teams/:teamId/roster-history', async (req, res) => {
     res.json(result.rows);
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Server error' });
+    res.status(err.status || 500).json({ error: err.message || 'Server error' });
   }
 });
 

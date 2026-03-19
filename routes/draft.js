@@ -1,7 +1,21 @@
 const express = require('express');
-const { authenticateToken } = require('../middleware/auth');
+const { authenticateToken, requireCommissioner, assertCommissionerOfSeason } = require('../middleware/auth');
 
 const router = express.Router();
+
+// Load draft with FOR UPDATE lock, assert caller is commissioner of its league.
+// Must be called inside a transaction.
+async function loadDraftForUpdate(client, req, draftId) {
+  const r = await client.query('SELECT * FROM drafts WHERE id = $1 FOR UPDATE', [draftId]);
+  if (r.rows.length === 0) {
+    const err = new Error('Draft not found');
+    err.status = 404;
+    throw err;
+  }
+  const draft = r.rows[0];
+  await assertCommissionerOfSeason(client, req, draft.season_id);
+  return draft;
+}
 
 // ============================================================================
 // PUBLIC: Draft board (anyone can view)
@@ -71,12 +85,68 @@ router.get('/season/:seasonId', async (req, res) => {
   }
 });
 
+// Get filled positions for a team
+router.get('/:draftId/filled-positions/:teamId', async (req, res) => {
+  const pool = req.app.get('pool');
+  try {
+    const result = await pool.query(
+      'SELECT position FROM draft_picks WHERE draft_id = $1 AND team_id = $2 AND player_id IS NOT NULL',
+      [req.params.draftId, req.params.teamId]
+    );
+    res.json(result.rows.map(r => r.position));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Get available players (not yet drafted in this draft)
+router.get('/:draftId/available', async (req, res) => {
+  const pool = req.app.get('pool');
+  const { q, position, active_only } = req.query;
+
+  try {
+    let query = `
+      SELECT p.id, p.name, p.primary_position, p.current_mlb_team_id, p.status
+      FROM players p
+      WHERE p.id NOT IN (
+        SELECT player_id FROM draft_picks WHERE draft_id = $1 AND player_id IS NOT NULL
+      )
+    `;
+    const params = [req.params.draftId];
+
+    if (active_only !== 'false') {
+      query += ` AND p.status = 'Active'`;
+    }
+
+    if (q && q.length >= 2) {
+      params.push(`%${q}%`);
+      query += ` AND p.name ILIKE $${params.length}`;
+    }
+
+    if (position) {
+      params.push(position);
+      query += ` AND p.primary_position = $${params.length}`;
+    }
+
+    query += ` ORDER BY p.name LIMIT 50`;
+
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // ============================================================================
 // COMMISSIONER: Draft management
 // ============================================================================
 
+router.use(authenticateToken, requireCommissioner);
+
 // Create a new draft
-router.post('/', authenticateToken, async (req, res) => {
+router.post('/', async (req, res) => {
   const pool = req.app.get('pool');
   const { season_id, draft_type, rounds } = req.body;
 
@@ -85,19 +155,27 @@ router.post('/', authenticateToken, async (req, res) => {
   }
 
   try {
+    await assertCommissionerOfSeason(pool, req, season_id);
+
+    const existing = await pool.query('SELECT id FROM drafts WHERE season_id = $1', [season_id]);
+    if (existing.rows.length > 0) {
+      return res.status(409).json({ error: 'A draft already exists for this season' });
+    }
+
     const result = await pool.query(
       'INSERT INTO drafts (season_id, draft_type, rounds) VALUES ($1, $2, $3) RETURNING *',
       [season_id, draft_type || 'snake', rounds || 11]
     );
     res.json({ success: true, draft: result.rows[0] });
   } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'A draft already exists for this season' });
     console.error(err);
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
 // Set draft order
-router.post('/:draftId/order', authenticateToken, async (req, res) => {
+router.post('/:draftId/order', async (req, res) => {
   const pool = req.app.get('pool');
   const { order } = req.body; // Array of { team_id, order_position }
 
@@ -110,13 +188,28 @@ router.post('/:draftId/order', authenticateToken, async (req, res) => {
     await client.query('BEGIN');
 
     const draftId = req.params.draftId;
+    const draft = await loadDraftForUpdate(client, req, draftId);
 
-    // Get draft info
-    const draftResult = await client.query('SELECT * FROM drafts WHERE id = $1', [draftId]);
-    if (draftResult.rows.length === 0) {
-      throw new Error('Draft not found');
+    if (draft.status !== 'setup') {
+      throw new Error('Cannot change draft order after the draft has started');
     }
-    const draft = draftResult.rows[0];
+
+    // Verify every team in the order belongs to this draft's season,
+    // and every team in the season is present (no one left off the clock)
+    const teamIds = order.map(e => e.team_id);
+    const teamCheck = await client.query(
+      'SELECT id FROM teams WHERE season_id = $1',
+      [draft.season_id]
+    );
+    const seasonTeamIds = new Set(teamCheck.rows.map(r => r.id));
+    for (const tid of teamIds) {
+      if (!seasonTeamIds.has(tid)) {
+        throw new Error(`Team ${tid} does not belong to this draft's season`);
+      }
+    }
+    if (teamIds.length !== seasonTeamIds.size) {
+      throw new Error(`Draft order must include all ${seasonTeamIds.size} teams in the season (got ${teamIds.length})`);
+    }
 
     // Clear existing order
     await client.query('DELETE FROM draft_order WHERE draft_id = $1', [draftId]);
@@ -163,34 +256,53 @@ router.post('/:draftId/order', authenticateToken, async (req, res) => {
   } catch (err) {
     await client.query('ROLLBACK');
     console.error(err);
-    res.status(400).json({ error: err.message });
+    res.status(err.status || 400).json({ error: err.message });
   } finally {
     client.release();
   }
 });
 
 // Start the draft
-router.post('/:draftId/start', authenticateToken, async (req, res) => {
+router.post('/:draftId/start', async (req, res) => {
   const pool = req.app.get('pool');
+  const client = await pool.connect();
   try {
-    const result = await pool.query(
-      "UPDATE drafts SET status = 'active', current_pick = 1, updated_at = NOW() WHERE id = $1 RETURNING *",
-      [req.params.draftId]
-    );
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Draft not found' });
+    await client.query('BEGIN');
+
+    const draft = await loadDraftForUpdate(client, req, req.params.draftId);
+
+    if (draft.status !== 'setup') {
+      throw new Error(`Draft is already ${draft.status}`);
     }
+
+    const orderCheck = await client.query(
+      'SELECT COUNT(*) as c FROM draft_order WHERE draft_id = $1',
+      [draft.id]
+    );
+    if (parseInt(orderCheck.rows[0].c) === 0) {
+      throw new Error('Cannot start draft: draft order has not been set');
+    }
+
+    const result = await client.query(
+      "UPDATE drafts SET status = 'active', current_pick = 1, updated_at = NOW() WHERE id = $1 RETURNING *",
+      [draft.id]
+    );
+
+    await client.query('COMMIT');
     res.json({ success: true, draft: result.rows[0] });
   } catch (err) {
+    await client.query('ROLLBACK');
     console.error(err);
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 400).json({ error: err.message });
+  } finally {
+    client.release();
   }
 });
 
 // Make a pick (commissioner inputs a draft selection)
-router.post('/:draftId/pick', authenticateToken, async (req, res) => {
+router.post('/:draftId/pick', async (req, res) => {
   const pool = req.app.get('pool');
-  const { player_id, position } = req.body;
+  const { player_id, position, expected_pick_number } = req.body;
 
   if (!player_id || !position) {
     return res.status(400).json({ error: 'player_id and position required' });
@@ -201,14 +313,15 @@ router.post('/:draftId/pick', authenticateToken, async (req, res) => {
     await client.query('BEGIN');
 
     const draftId = req.params.draftId;
-
-    // Get draft
-    const draftResult = await client.query('SELECT * FROM drafts WHERE id = $1', [draftId]);
-    if (draftResult.rows.length === 0) throw new Error('Draft not found');
-    const draft = draftResult.rows[0];
+    const draft = await loadDraftForUpdate(client, req, draftId);
 
     if (draft.status !== 'active') {
       throw new Error('Draft is not active');
+    }
+
+    // If client sent what pick it thinks it's making, verify we agree (catches lost-response retries)
+    if (expected_pick_number != null && expected_pick_number !== draft.current_pick) {
+      throw new Error(`Draft has moved on — you were making pick #${expected_pick_number} but it's now pick #${draft.current_pick}`);
     }
 
     // Check if player is already drafted
@@ -228,11 +341,31 @@ router.post('/:draftId/pick', authenticateToken, async (req, res) => {
     if (currentPickResult.rows.length === 0) throw new Error('No pick slot found');
     const pickSlot = currentPickResult.rows[0];
 
-    // Record the pick
-    await client.query(
-      'UPDATE draft_picks SET player_id = $1, position = $2, picked_at = NOW() WHERE id = $3',
+    // Validate position against roster template and this team's fill state
+    const templateResult = await client.query(
+      'SELECT count FROM roster_templates WHERE season_id = $1 AND position = $2',
+      [draft.season_id, position]
+    );
+    if (templateResult.rows.length === 0) {
+      throw new Error(`Position "${position}" is not in this season's roster template`);
+    }
+    const slotLimit = templateResult.rows[0].count;
+    const filledResult = await client.query(
+      'SELECT COUNT(*) as c FROM draft_picks WHERE draft_id = $1 AND team_id = $2 AND position = $3 AND player_id IS NOT NULL',
+      [draftId, pickSlot.team_id, position]
+    );
+    if (parseInt(filledResult.rows[0].c) >= slotLimit) {
+      throw new Error(`${position} is already filled for this team (${slotLimit}/${slotLimit})`);
+    }
+
+    // Record the pick — guard against overwriting a filled slot
+    const updateResult = await client.query(
+      'UPDATE draft_picks SET player_id = $1, position = $2, picked_at = NOW() WHERE id = $3 AND player_id IS NULL',
       [player_id, position, pickSlot.id]
     );
+    if (updateResult.rowCount === 0) {
+      throw new Error('Pick slot is already filled — draft state may have drifted');
+    }
 
     // Also create the team_roster entry
     const today = new Date().toISOString().split('T')[0];
@@ -263,10 +396,9 @@ router.post('/:draftId/pick', authenticateToken, async (req, res) => {
       );
     }
 
-    await client.query('COMMIT');
+    const playerResult = await client.query('SELECT name FROM players WHERE id = $1', [player_id]);
 
-    // Get player name for response
-    const playerResult = await pool.query('SELECT name FROM players WHERE id = $1', [player_id]);
+    await client.query('COMMIT');
 
     res.json({
       success: true,
@@ -282,14 +414,14 @@ router.post('/:draftId/pick', authenticateToken, async (req, res) => {
   } catch (err) {
     await client.query('ROLLBACK');
     console.error(err);
-    res.status(400).json({ error: err.message });
+    res.status(err.status || 400).json({ error: err.message });
   } finally {
     client.release();
   }
 });
 
 // Undo the last pick
-router.post('/:draftId/undo', authenticateToken, async (req, res) => {
+router.post('/:draftId/undo', async (req, res) => {
   const pool = req.app.get('pool');
   const client = await pool.connect();
 
@@ -297,9 +429,7 @@ router.post('/:draftId/undo', authenticateToken, async (req, res) => {
     await client.query('BEGIN');
 
     const draftId = req.params.draftId;
-    const draftResult = await client.query('SELECT * FROM drafts WHERE id = $1', [draftId]);
-    if (draftResult.rows.length === 0) throw new Error('Draft not found');
-    const draft = draftResult.rows[0];
+    await loadDraftForUpdate(client, req, draftId);
 
     // Find the last made pick
     const lastPickResult = await client.query(
@@ -341,14 +471,14 @@ router.post('/:draftId/undo', authenticateToken, async (req, res) => {
   } catch (err) {
     await client.query('ROLLBACK');
     console.error(err);
-    res.status(400).json({ error: err.message });
+    res.status(err.status || 400).json({ error: err.message });
   } finally {
     client.release();
   }
 });
 
 // Edit an existing pick (change position and/or player)
-router.put('/:draftId/pick/:pickNumber', authenticateToken, async (req, res) => {
+router.put('/:draftId/pick/:pickNumber', async (req, res) => {
   const pool = req.app.get('pool');
   const { position, player_id } = req.body;
 
@@ -362,6 +492,7 @@ router.put('/:draftId/pick/:pickNumber', authenticateToken, async (req, res) => 
 
     const draftId = req.params.draftId;
     const pickNumber = req.params.pickNumber;
+    const draft = await loadDraftForUpdate(client, req, draftId);
 
     const pickResult = await client.query(
       'SELECT * FROM draft_picks WHERE draft_id = $1 AND pick_number = $2',
@@ -385,6 +516,25 @@ router.put('/:draftId/pick/:pickNumber', authenticateToken, async (req, res) => 
       }
     }
 
+    // If changing position, validate against template and fill state (excluding this pick)
+    if (newPosition !== pick.position) {
+      const templateResult = await client.query(
+        'SELECT count FROM roster_templates WHERE season_id = $1 AND position = $2',
+        [draft.season_id, newPosition]
+      );
+      if (templateResult.rows.length === 0) {
+        throw new Error(`Position "${newPosition}" is not in this season's roster template`);
+      }
+      const slotLimit = templateResult.rows[0].count;
+      const filledResult = await client.query(
+        'SELECT COUNT(*) as c FROM draft_picks WHERE draft_id = $1 AND team_id = $2 AND position = $3 AND player_id IS NOT NULL AND id != $4',
+        [draftId, pick.team_id, newPosition, pick.id]
+      );
+      if (parseInt(filledResult.rows[0].c) >= slotLimit) {
+        throw new Error(`${newPosition} is already filled for this team (${slotLimit}/${slotLimit})`);
+      }
+    }
+
     // Update the draft pick
     await client.query(
       'UPDATE draft_picks SET position = $1, player_id = $2 WHERE id = $3',
@@ -404,12 +554,12 @@ router.put('/:draftId/pick/:pickNumber', authenticateToken, async (req, res) => 
       [pick.team_id, newPlayerId, newPosition, rosterStatus, today]
     );
 
-    await client.query('COMMIT');
-
-    const playerResult = await pool.query('SELECT name FROM players WHERE id = $1', [newPlayerId]);
+    const playerResult = await client.query('SELECT name FROM players WHERE id = $1', [newPlayerId]);
     const oldPlayerResult = player_id && player_id !== pick.player_id
-      ? await pool.query('SELECT name FROM players WHERE id = $1', [pick.player_id])
+      ? await client.query('SELECT name FROM players WHERE id = $1', [pick.player_id])
       : null;
+
+    await client.query('COMMIT');
 
     let message = '';
     if (oldPlayerResult) {
@@ -422,41 +572,32 @@ router.put('/:draftId/pick/:pickNumber', authenticateToken, async (req, res) => 
   } catch (err) {
     await client.query('ROLLBACK');
     console.error(err);
-    res.status(400).json({ error: err.message });
+    res.status(err.status || 400).json({ error: err.message });
   } finally {
     client.release();
   }
 });
 
-// Get filled positions for the team currently on the clock
-router.get('/:draftId/filled-positions/:teamId', async (req, res) => {
-  const pool = req.app.get('pool');
-  try {
-    const result = await pool.query(
-      'SELECT position FROM draft_picks WHERE draft_id = $1 AND team_id = $2 AND player_id IS NOT NULL',
-      [req.params.draftId, req.params.teamId]
-    );
-    res.json(result.rows.map(r => r.position));
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Server error' });
-  }
-});
-
 // Cancel/delete a draft entirely (reset to pre-draft state)
-router.delete('/:draftId', authenticateToken, async (req, res) => {
+router.delete('/:draftId', async (req, res) => {
   const pool = req.app.get('pool');
   const client = await pool.connect();
 
   try {
     await client.query('BEGIN');
     const draftId = req.params.draftId;
+    await loadDraftForUpdate(client, req, draftId);
 
-    // Remove roster entries created by this draft
+    // Remove roster entries created by this draft — match both team and player
+    // so we don't nuke the same player's DRAFTED rows from other seasons
     await client.query(
-      `DELETE FROM team_rosters WHERE reason = 'DRAFTED' AND player_id IN (
-        SELECT player_id FROM draft_picks WHERE draft_id = $1 AND player_id IS NOT NULL
-      )`,
+      `DELETE FROM team_rosters tr
+       USING draft_picks dp
+       WHERE dp.draft_id = $1
+         AND dp.player_id IS NOT NULL
+         AND tr.team_id = dp.team_id
+         AND tr.player_id = dp.player_id
+         AND tr.reason = 'DRAFTED'`,
       [draftId]
     );
 
@@ -470,14 +611,14 @@ router.delete('/:draftId', authenticateToken, async (req, res) => {
   } catch (err) {
     await client.query('ROLLBACK');
     console.error(err);
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   } finally {
     client.release();
   }
 });
 
 // Trigger manual HR sync
-router.post('/sync-hrs', authenticateToken, async (req, res) => {
+router.post('/sync-hrs', async (req, res) => {
   try {
     const fetchHomeRuns = require('../scripts/fetch-home-runs');
     const { getActiveLeague, formatDate } = require('../helpers/league');
@@ -496,46 +637,6 @@ router.post('/sync-hrs', authenticateToken, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
-  }
-});
-
-// Get available players (not yet drafted in this draft)
-router.get('/:draftId/available', async (req, res) => {
-  const pool = req.app.get('pool');
-  const { q, position, active_only } = req.query;
-
-  try {
-    let query = `
-      SELECT p.id, p.name, p.primary_position, p.current_mlb_team_id, p.status
-      FROM players p
-      WHERE p.id NOT IN (
-        SELECT player_id FROM draft_picks WHERE draft_id = $1 AND player_id IS NOT NULL
-      )
-    `;
-    const params = [req.params.draftId];
-
-    // Default to active only, unless explicitly set to false
-    if (active_only !== 'false') {
-      query += ` AND p.status = 'Active'`;
-    }
-
-    if (q && q.length >= 2) {
-      params.push(`%${q}%`);
-      query += ` AND p.name ILIKE $${params.length}`;
-    }
-
-    if (position) {
-      params.push(position);
-      query += ` AND p.primary_position = $${params.length}`;
-    }
-
-    query += ` ORDER BY p.name LIMIT 50`;
-
-    const result = await pool.query(query, params);
-    res.json(result.rows);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Server error' });
   }
 });
 
