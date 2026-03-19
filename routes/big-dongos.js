@@ -26,12 +26,9 @@ router.get('/:seasonId/leaderboard', async (req, res) => {
       FROM big_dongos_swings bds
       JOIN users u ON bds.user_id = u.id
       LEFT JOIN user_teams ut ON ut.user_id = u.id
-      LEFT JOIN teams t ON ut.team_id = t.id
-      LEFT JOIN seasons s ON t.season_id = s.id AND s.id = bds.season_id
+      LEFT JOIN teams t ON ut.team_id = t.id AND t.season_id = bds.season_id
       WHERE bds.season_id = $1
-        AND bds.distance_feet > 0
         AND bds.is_warmup = false
-        AND (t.season_id = bds.season_id OR t.id IS NULL)
       GROUP BY bds.user_id, u.email
       ORDER BY best_distance_total_inches DESC
     `, [req.params.seasonId]);
@@ -95,14 +92,16 @@ router.get('/:seasonId/my-results', authenticateToken, async (req, res) => {
       attempts[row.attempt_number].push(row);
     }
 
-    const attemptCount = Object.keys(attempts).length;
+    const attemptNumbers = Object.keys(attempts).map(Number);
+    const attemptCount = attemptNumbers.length;
 
-    // For resume: find how many swings in the current/latest attempt
+    // For resume: highest swing_number in the latest attempt (not .length — tolerates gaps from failed saves)
     let currentAttemptSwings = 0;
-    let currentAttemptNumber = attemptCount;
+    let currentAttemptNumber = 0;
     if (attemptCount > 0) {
+      currentAttemptNumber = Math.max(...attemptNumbers);
       const latestAttempt = attempts[currentAttemptNumber];
-      currentAttemptSwings = latestAttempt ? latestAttempt.length : 0;
+      currentAttemptSwings = Math.max(...latestAttempt.map(s => s.swing_number));
     }
 
     res.json({
@@ -125,16 +124,22 @@ router.get('/:seasonId/my-results', authenticateToken, async (req, res) => {
 
 router.post('/:seasonId/swing', authenticateToken, async (req, res) => {
   const pool = req.app.get('pool');
-  const { attempt_number, swing_number, is_warmup, distance_feet, distance_inches,
+  const { attempt_number, swing_number, distance_feet, distance_inches,
           exit_velocity, launch_angle, contact_quality } = req.body;
 
   if (!attempt_number || !swing_number || distance_feet == null || distance_inches == null) {
     return res.status(400).json({ error: 'Missing required fields' });
   }
 
+  if (attempt_number < 1 || attempt_number > MAX_ATTEMPTS) {
+    return res.status(400).json({ error: `Attempt number must be 1-${MAX_ATTEMPTS}` });
+  }
+
   if (swing_number < 1 || swing_number > TOTAL_SWINGS) {
     return res.status(400).json({ error: `Swing number must be 1-${TOTAL_SWINGS}` });
   }
+
+  const is_warmup = swing_number <= WARMUP_SWINGS;
 
   try {
     // Check attempts used
@@ -175,13 +180,16 @@ router.post('/:seasonId/swing', authenticateToken, async (req, res) => {
       RETURNING *
     `, [
       req.params.seasonId, req.user.userId, attempt_number, swing_number,
-      is_warmup || false,
+      is_warmup,
       distance_feet, distance_inches, exit_velocity || 0, launch_angle || 0,
       contact_quality || 0
     ]);
 
     res.json(result.rows[0]);
   } catch (error) {
+    if (error.code === '23505') {
+      return res.status(400).json({ error: 'Swing already recorded' });
+    }
     console.error('Error saving swing:', error);
     res.status(500).json({ error: 'Failed to save swing' });
   }
