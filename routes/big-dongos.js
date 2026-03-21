@@ -17,34 +17,41 @@ router.get('/:seasonId/leaderboard', async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT
-        bds.user_id,
+        u.id as user_id,
         u.email,
-        MAX(t.name) as team_name,
-        MAX(t.manager_name) as manager_name,
+        t.name as team_name,
+        t.manager_name,
         MAX(bds.distance_feet * 12 + bds.distance_inches) as best_distance_total_inches,
         COUNT(DISTINCT bds.attempt_number) as attempts_used
-      FROM big_dongos_swings bds
-      JOIN users u ON bds.user_id = u.id
-      LEFT JOIN user_teams ut ON ut.user_id = u.id
-      LEFT JOIN teams t ON ut.team_id = t.id AND t.season_id = bds.season_id
-      WHERE bds.season_id = $1
-        AND bds.is_warmup = false
-      GROUP BY bds.user_id, u.email
-      ORDER BY best_distance_total_inches DESC
+      FROM teams t
+      LEFT JOIN user_teams ut ON ut.team_id = t.id
+      LEFT JOIN users u ON ut.user_id = u.id
+      LEFT JOIN big_dongos_swings bds
+        ON bds.user_id = u.id AND bds.season_id = t.season_id AND bds.is_warmup = false
+      WHERE t.season_id = $1
+      GROUP BY u.id, u.email, t.name, t.manager_name
+      ORDER BY best_distance_total_inches DESC NULLS LAST, t.manager_name
     `, [req.params.seasonId]);
 
-    const leaderboard = result.rows.map((row, idx) => ({
-      rank: idx + 1,
-      user_id: row.user_id,
-      email: row.email,
-      team_name: row.team_name,
-      manager_name: row.manager_name || row.email,
-      best_distance_inches: row.best_distance_total_inches,
-      attempts_used: parseInt(row.attempts_used)
-    }));
+    let rank = 0;
+    const leaderboard = result.rows.map(row => {
+      const played = row.attempts_used > 0;
+      if (played) rank++;
+      return {
+        rank: played ? rank : null,
+        user_id: row.user_id,
+        email: row.email,
+        team_name: row.team_name,
+        manager_name: row.manager_name || row.email,
+        best_distance_inches: row.best_distance_total_inches,
+        attempts_used: parseInt(row.attempts_used),
+        played,
+      };
+    });
 
     // Get exact feet/inches for each user's best swing
     for (const entry of leaderboard) {
+      if (!entry.played) continue;
       const bestSwing = await pool.query(`
         SELECT distance_feet, distance_inches, exit_velocity, launch_angle
         FROM big_dongos_swings
