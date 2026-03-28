@@ -617,23 +617,21 @@ router.delete('/:draftId', async (req, res) => {
   }
 });
 
-// Trigger manual HR sync
+// Trigger manual HR sync — refetches MLB data and recalcs scores from season start,
+// so retroactive roster changes get picked up.
 router.post('/sync-hrs', async (req, res) => {
   try {
     const fetchHomeRuns = require('../scripts/fetch-home-runs');
-    const { getActiveLeague, formatDate } = require('../helpers/league');
+    const { getActiveSeason, formatDate } = require('../helpers/league');
     const pool = req.app.get('pool');
-    const league = await getActiveLeague(pool);
-    if (!league) return res.status(404).json({ error: 'No active league' });
+    const season = await getActiveSeason(pool);
+    if (!season) return res.status(404).json({ error: 'No active season' });
 
     const todayStr = new Date().toISOString().split('T')[0];
-    const leagueStart = formatDate(league.start_date);
-    const threeDaysAgo = new Date();
-    threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
-    const startDate = threeDaysAgo.toISOString().split('T')[0] < leagueStart ? leagueStart : threeDaysAgo.toISOString().split('T')[0];
+    const seasonStart = formatDate(season.start_date);
 
-    await fetchHomeRuns(startDate, todayStr);
-    res.json({ success: true, message: `HR sync complete (${startDate} to ${todayStr})` });
+    await fetchHomeRuns(seasonStart, todayStr);
+    res.json({ success: true, message: `HR sync complete (${seasonStart} to ${todayStr})` });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
