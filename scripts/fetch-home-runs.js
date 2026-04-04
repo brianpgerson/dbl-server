@@ -97,7 +97,17 @@ async function fetchHomeRuns(startDate, endDate) {
 async function updateScores(startDate, endDate) {
   // Truncate existing scores for the date range to recalculate
   await pool.query('DELETE FROM scores WHERE date BETWEEN $1 AND $2', [startDate, endDate]);
-  
+
+  // Also rebuild HR feed events for this range so the feed stays in sync with scores
+  const { getActiveSeason } = require('../helpers/league');
+  const season = await getActiveSeason(pool);
+  if (season) {
+    await pool.query(
+      "DELETE FROM feed_events WHERE season_id = $1 AND event_type = 'hr' AND event_date BETWEEN $2 AND $3",
+      [season.id, startDate, endDate]
+    );
+  }
+
   // Get all home runs in date range and calculate scoring
   const query = `
     WITH player_hrs AS (
@@ -106,17 +116,20 @@ async function updateScores(startDate, endDate) {
       WHERE pgs.date BETWEEN $1 AND $2
     )
     SELECT ph.player_id, ph.date, ph.game_id, ph.home_runs,
-           tr.team_id, tr.position, tr.status
+           tr.team_id, tr.position, tr.status,
+           p.name as player_name, t.season_id
     FROM player_hrs ph
     JOIN team_rosters tr ON ph.player_id = tr.player_id
+    JOIN teams t ON tr.team_id = t.id
+    JOIN players p ON p.id = ph.player_id
     WHERE tr.effective_date <= ph.date
     AND (tr.end_date IS NULL OR tr.end_date > ph.date)
     AND tr.status = 'STARTER'
     ORDER BY ph.date
   `;
-  
+
   const result = await pool.query(query, [startDate, endDate]);
-  
+
   // Insert score records for each valid HR
   let scoreCount = 0;
   for (const row of result.rows) {
@@ -126,11 +139,33 @@ async function updateScores(startDate, endDate) {
         'INSERT INTO scores (game_id, team_id, position, date) VALUES ($1, $2, $3, $4)',
         [row.game_id, row.team_id, row.position, row.date]
       );
+      // Per-HR feed event
+      await pool.query(
+        'INSERT INTO feed_events (season_id, team_id, event_type, event_date, payload) VALUES ($1, $2, $3, $4, $5)',
+        [row.season_id, row.team_id, 'hr', row.date, JSON.stringify({
+          player_id: row.player_id,
+          player_name: row.player_name,
+          position: row.position,
+          game_id: row.game_id,
+          hr_number: i + 1,
+          of: row.home_runs,
+        })]
+      );
       scoreCount++;
     }
   }
-  
+
   console.log(`Processed scoring for ${scoreCount} home runs`);
+
+  // Evaluate badges for the active season after scores are fresh
+  if (season) {
+    const { evaluateBadges } = require('./evaluate-badges');
+    try {
+      await evaluateBadges(pool, season.id, endDate);
+    } catch (err) {
+      console.error('[badges] post-score evaluation failed:', err.message);
+    }
+  }
 }
 
 // Export function for module import

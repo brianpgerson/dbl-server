@@ -223,6 +223,18 @@ router.post('/swap', authenticateToken, async (req, res) => {
        player1.position === 'BEN' ? 'BENCH' : 'STARTER', player1.position === 'BEN' ? reason : null, calculatedEffectiveDate]
     );
 
+    // Feed event for the swap
+    const seasonRes = await client.query('SELECT season_id FROM teams WHERE id = $1', [team]);
+    if (seasonRes.rows.length > 0) {
+      await client.query(
+        'INSERT INTO feed_events (season_id, team_id, event_type, event_date, payload) VALUES ($1, $2, $3, $4, $5)',
+        [seasonRes.rows[0].season_id, team, 'roster_swap', calculatedEffectiveDate, JSON.stringify({
+          player1: { id: p1, name: player1.name, from: player1.position, to: player2.position },
+          player2: { id: p2, name: player2.name, from: player2.position, to: player1.position },
+        })]
+      );
+    }
+
     await client.query('COMMIT');
 
     let message;
