@@ -15,7 +15,15 @@ async function evaluateBadges(pool, seasonId, asOfDate) {
   const date = dateStr(asOfDate);
   let awarded = 0;
 
+  // For non-repeatable achievements, skip teams that already have the badge on any prior date.
+  const alreadyAwarded = await pool.query(
+    `SELECT badge_key, team_id FROM badge_awards WHERE season_id = $1`,
+    [seasonId]
+  );
+  const have = new Set(alreadyAwarded.rows.map(r => `${r.badge_key}:${r.team_id}`));
+
   for (const [key, evalFn] of Object.entries(evaluators)) {
+    const def = byKey[key];
     let results;
     try {
       results = await evalFn(pool, seasonId, date);
@@ -24,6 +32,7 @@ async function evaluateBadges(pool, seasonId, asOfDate) {
       continue;
     }
     for (const { team_id, context } of results) {
+      if (!def?.repeatable && have.has(`${key}:${team_id}`)) continue;
       const r = await pool.query(
         `INSERT INTO badge_awards (season_id, team_id, badge_key, awarded_date, context)
          VALUES ($1, $2, $3, $4, $5)
@@ -32,8 +41,8 @@ async function evaluateBadges(pool, seasonId, asOfDate) {
         [seasonId, team_id, key, date, JSON.stringify(context || {})]
       );
       if (r.rows.length > 0) {
+        have.add(`${key}:${team_id}`);
         awarded++;
-        const def = byKey[key];
         await emitFeed(pool, seasonId, team_id, 'badge', date, {
           badge_key: key,
           badge_name: def?.name || key,
