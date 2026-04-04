@@ -45,6 +45,11 @@ async function evaluateBadges(pool, seasonId, asOfDate) {
   }
 
   // Titles: diff today's holders vs yesterday's, emit handoff events.
+  // Re-runs for the same date would otherwise duplicate — clear this date's first.
+  await pool.query(
+    `DELETE FROM feed_events WHERE season_id = $1 AND event_type = 'title_change' AND event_date = $2`,
+    [seasonId, date]
+  );
   const curr = await computeTitles(pool, seasonId, date);
   const prev = await computeTitles(pool, seasonId, addDays(date, -1));
   const changes = diffTitles(prev, curr);

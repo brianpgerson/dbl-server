@@ -267,21 +267,17 @@ const evaluators = {
   },
 
   santander_special: async (pool, seasonId, asOfDate) => {
-    // Drafted while not Active (status_at_pick captured at draft time), now has 5+ scoring HRs.
+    // Drafted while not Active (status_at_pick captured at draft time), now has 5+ HRs.
     const r = await pool.query(
       `SELECT dp.team_id, p.name as player_name, dp.status_at_pick,
-              COUNT(s.id)::int as hrs
+              COALESCE(SUM(pgs.home_runs), 0)::int as hrs
        FROM draft_picks dp
        JOIN drafts d ON dp.draft_id = d.id AND d.season_id = $1
        JOIN players p ON p.id = dp.player_id
-       LEFT JOIN scores s ON s.team_id = dp.team_id AND s.date <= $2
-         AND s.game_id IN (
-           SELECT game_id FROM player_game_stats
-           WHERE player_id = dp.player_id AND date <= $2
-         )
+       LEFT JOIN player_game_stats pgs ON pgs.player_id = dp.player_id AND pgs.date <= $2
        WHERE dp.status_at_pick IS NOT NULL AND dp.status_at_pick != 'Active'
        GROUP BY dp.team_id, p.name, dp.status_at_pick
-       HAVING COUNT(s.id) >= 5`,
+       HAVING COALESCE(SUM(pgs.home_runs), 0) >= 5`,
       [seasonId, asOfDate]
     );
     return r.rows.map(row => ({

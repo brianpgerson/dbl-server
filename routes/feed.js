@@ -6,7 +6,7 @@ const router = express.Router();
 router.get('/:seasonId', async (req, res) => {
   const pool = req.app.get('pool');
   const { seasonId } = req.params;
-  const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
+  const limit = Math.max(1, Math.min(parseInt(req.query.limit, 10) || 50, 200));
   const beforeId = req.query.before_id ? parseInt(req.query.before_id, 10) : null;
 
   try {
