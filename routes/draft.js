@@ -360,7 +360,10 @@ router.post('/:draftId/pick', async (req, res) => {
 
     // Record the pick — guard against overwriting a filled slot
     const updateResult = await client.query(
-      'UPDATE draft_picks SET player_id = $1, position = $2, picked_at = NOW() WHERE id = $3 AND player_id IS NULL',
+      `UPDATE draft_picks
+       SET player_id = $1, position = $2, picked_at = NOW(),
+           status_at_pick = (SELECT status FROM players WHERE id = $1)
+       WHERE id = $3 AND player_id IS NULL`,
       [player_id, position, pickSlot.id]
     );
     if (updateResult.rowCount === 0) {

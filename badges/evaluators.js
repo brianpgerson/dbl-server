@@ -232,7 +232,10 @@ const evaluators = {
     // Was 1st within the last 7 days, now 5th or worse.
     const now = await standings(pool, seasonId, asOfDate);
     const weekAgo = await standings(pool, seasonId, addDays(asOfDate, -7));
-    const wasFirst = new Set(weekAgo.filter(r => r.rank === 1).map(r => r.team_id));
+    // Ignore pre-season all-zeros tie where rank 1 is arbitrary.
+    const wasFirst = new Set(
+      weekAgo.filter(r => r.rank === 1 && r.total > 0).map(r => r.team_id)
+    );
     return now
       .filter(r => r.rank >= 5 && wasFirst.has(r.team_id))
       .map(r => ({ team_id: r.team_id, context: { from: 1, to: r.rank } }));
@@ -263,12 +266,28 @@ const evaluators = {
       .map(row => ({ team_id: row.team_id, context: { player_name: row.player_name, hrs: row.hrs } }));
   },
 
-  santander_special: async () => {
-    // DATA GAP: we don't store player status at draft time (players.status is current,
-    // and flips back to 'Active' once they return). Without historical status there's
-    // no reliable signal for "was IL when drafted." Stub until a status_at_draft column
-    // is added to draft_picks or a status history table exists.
-    return [];
+  santander_special: async (pool, seasonId, asOfDate) => {
+    // Drafted while not Active (status_at_pick captured at draft time), now has 5+ scoring HRs.
+    const r = await pool.query(
+      `SELECT dp.team_id, p.name as player_name, dp.status_at_pick,
+              COUNT(s.id)::int as hrs
+       FROM draft_picks dp
+       JOIN drafts d ON dp.draft_id = d.id AND d.season_id = $1
+       JOIN players p ON p.id = dp.player_id
+       LEFT JOIN scores s ON s.team_id = dp.team_id AND s.date <= $2
+         AND s.game_id IN (
+           SELECT game_id FROM player_game_stats
+           WHERE player_id = dp.player_id AND date <= $2
+         )
+       WHERE dp.status_at_pick IS NOT NULL AND dp.status_at_pick != 'Active'
+       GROUP BY dp.team_id, p.name, dp.status_at_pick
+       HAVING COUNT(s.id) >= 5`,
+      [seasonId, asOfDate]
+    );
+    return r.rows.map(row => ({
+      team_id: row.team_id,
+      context: { player_name: row.player_name, drafted_as: row.status_at_pick, hrs: row.hrs },
+    }));
   },
 
   // ---- date-gated / endgame ----
