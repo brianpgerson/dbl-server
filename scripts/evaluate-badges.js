@@ -59,6 +59,10 @@ async function evaluateBadges(pool, seasonId, asOfDate) {
     `DELETE FROM feed_events WHERE season_id = $1 AND event_type = 'title_change' AND event_date = $2`,
     [seasonId, date]
   );
+  const teamNames = await pool.query(
+    'SELECT id, manager_name FROM teams WHERE season_id = $1', [seasonId]
+  );
+  const nameById = Object.fromEntries(teamNames.rows.map(r => [r.id, r.manager_name]));
   const curr = await computeTitles(pool, seasonId, date);
   const prev = await computeTitles(pool, seasonId, addDays(date, -1));
   const changes = diffTitles(prev, curr);
@@ -68,7 +72,9 @@ async function evaluateBadges(pool, seasonId, asOfDate) {
       badge_key: c.badge_key,
       badge_name: def?.name || c.badge_key,
       tier: def?.tier,
+      kind: c.kind,
       prev_team_id: c.prev_team_id,
+      prev_manager_name: c.prev_team_id ? nameById[c.prev_team_id] : null,
       context: c.context,
     });
   }

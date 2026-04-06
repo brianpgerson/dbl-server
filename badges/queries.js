@@ -8,7 +8,9 @@ async function teamsInSeason(pool, seasonId) {
 // Cumulative HR totals per team as of a date.
 async function standings(pool, seasonId, asOfDate) {
   const r = await pool.query(
-    `SELECT t.id as team_id, COALESCE(COUNT(s.id), 0)::int as total
+    `SELECT t.id as team_id,
+            COALESCE(COUNT(s.id), 0)::int as total,
+            RANK() OVER (ORDER BY COUNT(s.id) DESC)::int as rank
      FROM teams t
      LEFT JOIN scores s ON s.team_id = t.id AND s.date <= $2
      WHERE t.season_id = $1
@@ -16,7 +18,7 @@ async function standings(pool, seasonId, asOfDate) {
      ORDER BY total DESC, t.id`,
     [seasonId, asOfDate]
   );
-  return r.rows.map((row, i) => ({ ...row, rank: i + 1 }));
+  return r.rows;
 }
 
 // Per-team HR count for a single date.
@@ -79,10 +81,16 @@ async function positionHrsByTeam(pool, seasonId, asOfDate, positions) {
      FROM scores s
      JOIN teams t ON s.team_id = t.id
      WHERE t.season_id = $1 AND s.date <= $2 AND s.position = ANY($3)
-     GROUP BY team_id`,
+     GROUP BY team_id
+     ORDER BY hrs DESC, team_id`,
     [seasonId, asOfDate, positions]
   );
   return r.rows;
+}
+
+async function seasonStartDate(pool, seasonId) {
+  const r = await pool.query('SELECT start_date FROM seasons WHERE id = $1', [seasonId]);
+  return dateStr(r.rows[0].start_date);
 }
 
 function dateStr(d) {
@@ -102,6 +110,7 @@ module.exports = {
   playerHrsByTeam,
   benchHrsByTeam,
   positionHrsByTeam,
+  seasonStartDate,
   dateStr,
   addDays,
 };

@@ -4,7 +4,7 @@
 // (season_id, team_id, badge_key, awarded_date) makes repeated returns idempotent.
 
 const {
-  teamsInSeason, standings, dailyTotals, playerHrsByTeam, addDays,
+  teamsInSeason, standings, dailyTotals, playerHrsByTeam, addDays, seasonStartDate,
 } = require('./queries');
 
 const STARTER_POSITIONS = ['C', '1B', '2B', 'SS', '3B', 'LF', 'CF', 'RF', 'DH'];
@@ -25,10 +25,13 @@ function milestone(threshold) {
 }
 
 // Length of consecutive-day streak ending on asOfDate where cond(count) is true.
+// Stops at season start so pre-season zero-count days don't extend a drought.
 async function streakLength(pool, seasonId, teamId, asOfDate, cond, maxLook = 30) {
+  const start = await seasonStartDate(pool, seasonId);
   let len = 0;
   for (let i = 0; i < maxLook; i++) {
     const d = addDays(asOfDate, -i);
+    if (d < start) break;
     const day = await dailyTotals(pool, seasonId, d);
     if (cond(day[teamId] || 0)) len++;
     else break;
@@ -79,6 +82,9 @@ const evaluators = {
   },
 
   famine: async (pool, seasonId, asOfDate) => {
+    // Don't evaluate for today — late-game teams would be falsely flagged mid-day.
+    const today = new Date().toISOString().split('T')[0];
+    if (asOfDate >= today) return [];
     const day = await dailyTotals(pool, seasonId, asOfDate);
     const teams = Object.keys(day);
     const zeros = teams.filter(t => day[t] === 0);
@@ -202,26 +208,29 @@ const evaluators = {
   },
 
   the_climb: async (pool, seasonId, asOfDate) => {
-    // Team is top-3 now AND was last place on some prior date this season.
+    // Team is top-3 now AND was in sole last place on some prior date this season
+    // (after scoring began). Daily scan — bounded by season length.
     const s = await standings(pool, seasonId, asOfDate);
     const top3 = s.filter(r => r.rank <= 3);
     const teamCount = s.length;
-    const season = await pool.query('SELECT start_date FROM seasons WHERE id = $1', [seasonId]);
-    const start = season.rows[0].start_date.toISOString().split('T')[0];
+    const start = await seasonStartDate(pool, seasonId);
     const awards = [];
     for (const team of top3) {
-      // Skip if already awarded (the ON CONFLICT handles the dupe, but avoid the scan)
       let wasLast = false;
       let d = addDays(asOfDate, -1);
       while (d >= start) {
         const hist = await standings(pool, seasonId, d);
-        const me = hist.find(r => r.team_id === team.team_id);
-        if (me && me.rank === teamCount && me.total > 0) {
-          // Only counts as "last" once scoring has actually started (total > 0 somewhere)
-          const anyScored = hist.some(r => r.total > 0);
-          if (anyScored) { wasLast = true; break; }
+        const anyScored = hist.some(r => r.total > 0);
+        if (anyScored) {
+          const lastRank = Math.max(...hist.map(r => r.rank));
+          const me = hist.find(r => r.team_id === team.team_id);
+          // Sole last: highest rank AND no one else shares it
+          if (me && me.rank === lastRank && hist.filter(r => r.rank === lastRank).length === 1) {
+            wasLast = true;
+            break;
+          }
         }
-        d = addDays(d, -7); // scan weekly to keep it cheap
+        d = addDays(d, -1);
       }
       if (wasLast) awards.push({ team_id: team.team_id, context: { rank: team.rank } });
     }
@@ -229,15 +238,22 @@ const evaluators = {
   },
 
   buried: async (pool, seasonId, asOfDate) => {
-    // Was 1st within the last 7 days, now 5th or worse.
+    // Was 1st within the last 7 days, now 5th or worse. Award only on the day the
+    // condition first becomes true (yesterday it was false) to avoid daily spam.
+    const buriedOn = async d => {
+      const now = await standings(pool, seasonId, d);
+      const weekAgo = await standings(pool, seasonId, addDays(d, -7));
+      const wasFirst = new Set(
+        weekAgo.filter(r => r.rank === 1 && r.total > 0).map(r => r.team_id)
+      );
+      return new Set(now.filter(r => r.rank >= 5 && wasFirst.has(r.team_id)).map(r => r.team_id));
+    };
+    const today = await buriedOn(asOfDate);
+    if (today.size === 0) return [];
+    const yesterday = await buriedOn(addDays(asOfDate, -1));
     const now = await standings(pool, seasonId, asOfDate);
-    const weekAgo = await standings(pool, seasonId, addDays(asOfDate, -7));
-    // Ignore pre-season all-zeros tie where rank 1 is arbitrary.
-    const wasFirst = new Set(
-      weekAgo.filter(r => r.rank === 1 && r.total > 0).map(r => r.team_id)
-    );
     return now
-      .filter(r => r.rank >= 5 && wasFirst.has(r.team_id))
+      .filter(r => today.has(r.team_id) && !yesterday.has(r.team_id))
       .map(r => ({ team_id: r.team_id, context: { from: 1, to: r.rank } }));
   },
 
@@ -292,10 +308,10 @@ const evaluators = {
 
   dead_weight: async (pool, seasonId, asOfDate) => {
     // Only fires on or after June 1 of the season year.
-    const season = await pool.query('SELECT season_year FROM seasons WHERE id = $1', [seasonId]);
+    const season = await pool.query('SELECT season_year, start_date FROM seasons WHERE id = $1', [seasonId]);
     const gate = `${season.rows[0].season_year}-06-01`;
     if (asOfDate < gate) return [];
-    // Any current STARTER roster slot with zero scores.
+    // A current STARTER whose player has zero HRs this season (across any stint).
     const r = await pool.query(
       `SELECT tr.team_id, p.name as player_name, tr.position
        FROM team_rosters tr
@@ -305,10 +321,12 @@ const evaluators = {
          AND tr.effective_date <= $2
          AND (tr.end_date IS NULL OR tr.end_date > $2)
          AND NOT EXISTS (
-           SELECT 1 FROM scores s
-           WHERE s.team_id = tr.team_id AND s.position = tr.position AND s.date <= $2
+           SELECT 1 FROM player_game_stats pgs
+           WHERE pgs.player_id = tr.player_id
+             AND pgs.date >= $3 AND pgs.date <= $2
+             AND pgs.home_runs > 0
          )`,
-      [seasonId, asOfDate]
+      [seasonId, asOfDate, season.rows[0].start_date]
     );
     // One award per team (context names the first offending slot)
     const seen = new Set();

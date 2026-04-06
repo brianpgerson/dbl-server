@@ -108,7 +108,12 @@ async function updateScores(startDate, endDate) {
     );
   }
 
-  // Get all home runs in date range and calculate scoring
+  // Get all home runs in date range and calculate scoring for the active season only
+  // (un-ended prior-season roster rows would otherwise match and pollute scores + feed).
+  if (!season) {
+    console.log('No active season — skipping score recalc');
+    return;
+  }
   const query = `
     WITH player_hrs AS (
       SELECT pgs.player_id, pgs.date, pgs.game_id, pgs.home_runs
@@ -120,7 +125,7 @@ async function updateScores(startDate, endDate) {
            p.name as player_name, t.season_id
     FROM player_hrs ph
     JOIN team_rosters tr ON ph.player_id = tr.player_id
-    JOIN teams t ON tr.team_id = t.id
+    JOIN teams t ON tr.team_id = t.id AND t.season_id = $3
     JOIN players p ON p.id = ph.player_id
     WHERE tr.effective_date <= ph.date
     AND (tr.end_date IS NULL OR tr.end_date > ph.date)
@@ -128,7 +133,7 @@ async function updateScores(startDate, endDate) {
     ORDER BY ph.date
   `;
 
-  const result = await pool.query(query, [startDate, endDate]);
+  const result = await pool.query(query, [startDate, endDate, season.id]);
 
   // Insert score records for each valid HR
   let scoreCount = 0;
@@ -158,13 +163,11 @@ async function updateScores(startDate, endDate) {
   console.log(`Processed scoring for ${scoreCount} home runs`);
 
   // Evaluate badges for the active season after scores are fresh
-  if (season) {
-    const { evaluateBadges } = require('./evaluate-badges');
-    try {
-      await evaluateBadges(pool, season.id, endDate);
-    } catch (err) {
-      console.error('[badges] post-score evaluation failed:', err.message);
-    }
+  const { evaluateBadges } = require('./evaluate-badges');
+  try {
+    await evaluateBadges(pool, season.id, endDate);
+  } catch (err) {
+    console.error('[badges] post-score evaluation failed:', err.message);
   }
 }
 

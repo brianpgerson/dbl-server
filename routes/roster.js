@@ -92,6 +92,18 @@ router.post('/move', authenticateToken, async (req, res) => {
       );
     }
 
+    // Feed event for the move (single-player bench/activate)
+    const seasonRes = await client.query('SELECT season_id FROM teams WHERE id = $1', [teamId]);
+    const nameRes = await client.query('SELECT name FROM players WHERE id = $1', [playerId]);
+    if (seasonRes.rows.length > 0) {
+      await client.query(
+        'INSERT INTO feed_events (season_id, team_id, event_type, event_date, payload) VALUES ($1, $2, $3, $4, $5)',
+        [seasonRes.rows[0].season_id, teamId, 'roster_move', effectiveDate, JSON.stringify({
+          player: { id: playerId, name: nameRes.rows[0]?.name, from: player.position, to: newPosition },
+        })]
+      );
+    }
+
     await client.query('COMMIT');
     res.json({ success: true, message: 'Roster move completed' });
   } catch (err) {

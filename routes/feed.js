@@ -2,19 +2,21 @@ const express = require('express');
 
 const router = express.Router();
 
-// Newest-first feed, cursor-paginated by id.
+// Newest-first feed, keyset-paginated by (event_date, id) since id order != date order
+// (hr/title_change rows get fresh ids every sync while badge/swap rows keep originals).
 router.get('/:seasonId', async (req, res) => {
   const pool = req.app.get('pool');
   const { seasonId } = req.params;
   const limit = Math.max(1, Math.min(parseInt(req.query.limit, 10) || 50, 200));
+  const beforeDate = req.query.before_date || null;
   const beforeId = req.query.before_id ? parseInt(req.query.before_id, 10) : null;
 
   try {
     const params = [seasonId];
     let where = 'fe.season_id = $1';
-    if (beforeId) {
-      params.push(beforeId);
-      where += ` AND fe.id < $${params.length}`;
+    if (beforeDate && beforeId) {
+      params.push(beforeDate, beforeId);
+      where += ` AND (fe.event_date, fe.id) < ($${params.length - 1}::date, $${params.length})`;
     }
     params.push(limit);
 
@@ -29,7 +31,10 @@ router.get('/:seasonId', async (req, res) => {
       params
     );
 
-    const nextCursor = r.rows.length === limit ? r.rows[r.rows.length - 1].id : null;
+    const last = r.rows[r.rows.length - 1];
+    const nextCursor = r.rows.length === limit
+      ? { event_date: last.event_date, id: last.id }
+      : null;
     res.json({ events: r.rows, next_cursor: nextCursor });
   } catch (err) {
     console.error(err);
