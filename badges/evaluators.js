@@ -144,10 +144,24 @@ const evaluators = {
   },
 
   the_drought: async (pool, seasonId, asOfDate) => {
+    // Only count days where the league actually played (league-wide total > 0).
+    // This skips off-days and not-yet-ingested days so a late-evening HR that
+    // hasn't hit the DB yet doesn't extend everyone's "drought."
+    const today = new Date().toISOString().split('T')[0];
+    if (asOfDate >= today) return [];
+    const start = await seasonStartDate(pool, seasonId);
     const teams = await teamsInSeason(pool, seasonId);
     const awards = [];
     for (const teamId of teams) {
-      const len = await streakLength(pool, seasonId, teamId, asOfDate, c => c === 0);
+      let len = 0;
+      let d = asOfDate;
+      while (d >= start && len < 30) {
+        const day = await dailyTotals(pool, seasonId, d);
+        const leagueTotal = Object.values(day).reduce((a, b) => a + b, 0);
+        if (leagueTotal === 0) { d = addDays(d, -1); continue; }
+        if ((day[teamId] || 0) === 0) { len++; d = addDays(d, -1); }
+        else break;
+      }
       if (len === 5) awards.push({ team_id: teamId, context: { streak: len } });
     }
     return awards;
