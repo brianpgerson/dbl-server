@@ -12,7 +12,7 @@ app.use(cors({
   origin: process.env.CORS_ORIGIN || 'https://dong-bong-league.com',
   credentials: true
 }));
-app.use(express.json());
+app.use(express.json({ limit: '2mb' }));
 
 // Share the DB pool with route handlers via app.set
 const pool = getDbPool();

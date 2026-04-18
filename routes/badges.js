@@ -29,7 +29,16 @@ router.get('/:seasonId/team/:teamId', async (req, res) => {
       }
     }
 
-    res.json({ awards: awards.rows, titles });
+    const customBadges = await pool.query(
+      `SELECT cb.id, cb.name, cb.description, cb.image_data, cba.awarded_date
+       FROM custom_badge_awards cba
+       JOIN custom_badges cb ON cba.custom_badge_id = cb.id
+       WHERE cb.season_id = $1 AND cba.team_id = $2
+       ORDER BY cba.awarded_date DESC`,
+      [seasonId, teamId]
+    );
+
+    res.json({ awards: awards.rows, titles, custom_badges: customBadges.rows });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to load badges' });

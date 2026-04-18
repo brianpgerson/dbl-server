@@ -5,17 +5,23 @@ async function teamsInSeason(pool, seasonId) {
   return r.rows.map(row => row.id);
 }
 
-// Cumulative HR totals per team as of a date.
+// Cumulative HR totals per team as of a date (includes commissioner bonuses).
 async function standings(pool, seasonId, asOfDate) {
   const r = await pool.query(
-    `SELECT t.id as team_id,
-            COALESCE(COUNT(s.id), 0)::int as total,
-            RANK() OVER (ORDER BY COUNT(s.id) DESC)::int as rank
-     FROM teams t
-     LEFT JOIN scores s ON s.team_id = t.id AND s.date <= $2
-     WHERE t.season_id = $1
-     GROUP BY t.id
-     ORDER BY total DESC, t.id`,
+    `WITH totals AS (
+       SELECT t.id as team_id,
+              COALESCE(COUNT(s.id), 0)::int
+              + COALESCE((SELECT SUM(b.hrs) FROM bonuses b
+                          WHERE b.team_id = t.id AND b.awarded_date <= $2), 0)::int
+              as total
+       FROM teams t
+       LEFT JOIN scores s ON s.team_id = t.id AND s.date <= $2
+       WHERE t.season_id = $1
+       GROUP BY t.id
+     )
+     SELECT team_id, total, RANK() OVER (ORDER BY total DESC)::int as rank
+     FROM totals
+     ORDER BY total DESC, team_id`,
     [seasonId, asOfDate]
   );
   return r.rows;

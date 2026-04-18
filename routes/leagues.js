@@ -50,15 +50,24 @@ router.get('/race', async (req, res) => {
 
     const query = `
       WITH daily_totals AS (
-        SELECT teams.id as team_id, teams.name as team_name, scores.date::date, COUNT(*) as daily_hrs
+        SELECT teams.id as team_id, teams.name as team_name, scores.date::date as date, COUNT(*) as daily_hrs
         FROM scores JOIN teams ON scores.team_id = teams.id
         WHERE teams.season_id = $1
         GROUP BY teams.id, teams.name, scores.date::date
+        UNION ALL
+        SELECT t.id, t.name, b.awarded_date, SUM(b.hrs)
+        FROM bonuses b JOIN teams t ON b.team_id = t.id
+        WHERE t.season_id = $1
+        GROUP BY t.id, t.name, b.awarded_date
+      ),
+      merged AS (
+        SELECT team_id, team_name, date, SUM(daily_hrs) as daily_hrs
+        FROM daily_totals GROUP BY team_id, team_name, date
       ),
       running_totals AS (
         SELECT team_id, team_name, date, daily_hrs,
           SUM(daily_hrs) OVER (PARTITION BY team_name ORDER BY date) as total_hrs
-        FROM daily_totals
+        FROM merged
       ),
       team_list AS (SELECT id, name FROM teams WHERE season_id = $1),
       date_range AS (
@@ -88,7 +97,9 @@ router.get('/seasons/:seasonId/standings', async (req, res) => {
 
     const result = await pool.query(`
       SELECT t.id as team_id, t.name as team_name, t.manager_name,
-        COUNT(s.id)::integer as total_hrs
+        (COUNT(s.id)
+         + COALESCE((SELECT SUM(b.hrs) FROM bonuses b WHERE b.team_id = t.id), 0)
+        )::integer as total_hrs
       FROM teams t LEFT JOIN scores s ON s.team_id = t.id
       WHERE t.season_id = $1
       GROUP BY t.id, t.name, t.manager_name
@@ -148,15 +159,24 @@ router.get('/seasons/:seasonId/race', async (req, res) => {
 
     const query = `
       WITH daily_totals AS (
-        SELECT teams.id as team_id, teams.name as team_name, scores.date::date, COUNT(*) as daily_hrs
+        SELECT teams.id as team_id, teams.name as team_name, scores.date::date as date, COUNT(*) as daily_hrs
         FROM scores JOIN teams ON scores.team_id = teams.id
         WHERE teams.season_id = $1
         GROUP BY teams.id, teams.name, scores.date::date
+        UNION ALL
+        SELECT t.id, t.name, b.awarded_date, SUM(b.hrs)
+        FROM bonuses b JOIN teams t ON b.team_id = t.id
+        WHERE t.season_id = $1
+        GROUP BY t.id, t.name, b.awarded_date
+      ),
+      merged AS (
+        SELECT team_id, team_name, date, SUM(daily_hrs) as daily_hrs
+        FROM daily_totals GROUP BY team_id, team_name, date
       ),
       running_totals AS (
         SELECT team_id, team_name, date, daily_hrs,
           SUM(daily_hrs) OVER (PARTITION BY team_name ORDER BY date) as total_hrs
-        FROM daily_totals
+        FROM merged
       ),
       team_list AS (SELECT id, name FROM teams WHERE season_id = $1),
       date_range AS (

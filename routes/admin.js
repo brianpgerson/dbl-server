@@ -479,4 +479,145 @@ router.get('/players/search', async (req, res) => {
   }
 });
 
+// ============================================================================
+// BONUSES + CUSTOM BADGES
+// ============================================================================
+
+router.get('/custom-badges/:seasonId', async (req, res) => {
+  const pool = req.app.get('pool');
+  try {
+    await assertCommissionerOfSeason(pool, req, req.params.seasonId);
+    const r = await pool.query(
+      'SELECT id, name, description FROM custom_badges WHERE season_id = $1 ORDER BY created_at DESC',
+      [req.params.seasonId]
+    );
+    res.json(r.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+router.get('/bonuses/:seasonId', async (req, res) => {
+  const pool = req.app.get('pool');
+  try {
+    await assertCommissionerOfSeason(pool, req, req.params.seasonId);
+    const r = await pool.query(
+      `SELECT b.id, b.team_id, t.name as team_name, t.manager_name, b.hrs, b.reason,
+              b.awarded_date, b.custom_badge_id, cb.name as custom_badge_name
+       FROM bonuses b
+       JOIN teams t ON b.team_id = t.id
+       LEFT JOIN custom_badges cb ON b.custom_badge_id = cb.id
+       WHERE b.season_id = $1
+       ORDER BY b.awarded_date DESC, b.id DESC`,
+      [req.params.seasonId]
+    );
+    res.json(r.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+router.post('/bonuses', async (req, res) => {
+  const pool = req.app.get('pool');
+  const { season_id, team_id, hrs, reason, awarded_date, custom_badge } = req.body;
+
+  if (!season_id || !team_id || !hrs) {
+    return res.status(400).json({ error: 'season_id, team_id, and hrs required' });
+  }
+  if (!Number.isInteger(hrs) || hrs < 1) {
+    return res.status(400).json({ error: 'hrs must be a positive integer' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await assertCommissionerOfSeason(client, req, season_id);
+    await assertCommissionerOfTeam(client, req, team_id);
+
+    let badgeId = null;
+    let badgeName = null;
+    if (custom_badge) {
+      if (custom_badge.id) {
+        const cb = await client.query(
+          'SELECT id, name FROM custom_badges WHERE id = $1 AND season_id = $2',
+          [custom_badge.id, season_id]
+        );
+        if (cb.rows.length === 0) throw new Error('Custom badge not found for this season');
+        badgeId = cb.rows[0].id;
+        badgeName = cb.rows[0].name;
+      } else if (custom_badge.name) {
+        const cb = await client.query(
+          `INSERT INTO custom_badges (season_id, name, description, image_data, created_by)
+           VALUES ($1, $2, $3, $4, $5) RETURNING id, name`,
+          [season_id, custom_badge.name, custom_badge.description || null,
+           custom_badge.image_data || null, req.user.userId]
+        );
+        badgeId = cb.rows[0].id;
+        badgeName = cb.rows[0].name;
+      }
+    }
+
+    const bonusDate = awarded_date || new Date().toISOString().split('T')[0];
+    const bonus = await client.query(
+      `INSERT INTO bonuses (season_id, team_id, hrs, reason, custom_badge_id, awarded_date, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+      [season_id, team_id, hrs, reason || null, badgeId, bonusDate, req.user.userId]
+    );
+
+    if (badgeId) {
+      await client.query(
+        `INSERT INTO custom_badge_awards (custom_badge_id, team_id, awarded_date, bonus_id)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (custom_badge_id, team_id) DO NOTHING`,
+        [badgeId, team_id, bonusDate, bonus.rows[0].id]
+      );
+    }
+
+    await client.query(
+      'INSERT INTO feed_events (season_id, team_id, event_type, event_date, payload) VALUES ($1, $2, $3, $4, $5)',
+      [season_id, team_id, 'bonus', bonusDate, JSON.stringify({
+        bonus_id: bonus.rows[0].id, hrs, reason,
+        custom_badge_id: badgeId, custom_badge_name: badgeName,
+      })]
+    );
+
+    await client.query('COMMIT');
+    res.json({ success: true, bonus: bonus.rows[0], custom_badge_id: badgeId, custom_badge_name: badgeName });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error(err);
+    res.status(err.status || 500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+router.delete('/bonuses/:id', async (req, res) => {
+  const pool = req.app.get('pool');
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const b = await client.query('SELECT season_id, team_id FROM bonuses WHERE id = $1', [req.params.id]);
+    if (b.rows.length === 0) throw Object.assign(new Error('Bonus not found'), { status: 404 });
+    await assertCommissionerOfSeason(client, req, b.rows[0].season_id);
+
+    await client.query(
+      "DELETE FROM feed_events WHERE season_id = $1 AND team_id = $2 AND event_type = 'bonus' AND (payload->>'bonus_id')::int = $3",
+      [b.rows[0].season_id, b.rows[0].team_id, req.params.id]
+    );
+    await client.query('DELETE FROM bonuses WHERE id = $1', [req.params.id]);
+
+    await client.query('COMMIT');
+    res.json({ success: true });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error(err);
+    res.status(err.status || 500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
 module.exports = router;
