@@ -523,7 +523,7 @@ router.post('/bonuses', async (req, res) => {
   const pool = req.app.get('pool');
   const { season_id, team_id, hrs, reason, awarded_date, custom_badge } = req.body;
 
-  if (!season_id || !team_id || !hrs) {
+  if (!season_id || !team_id || hrs == null) {
     return res.status(400).json({ error: 'season_id, team_id, and hrs required' });
   }
   if (!Number.isInteger(hrs) || hrs < 1) {
@@ -544,7 +544,11 @@ router.post('/bonuses', async (req, res) => {
           'SELECT id, name FROM custom_badges WHERE id = $1 AND season_id = $2',
           [custom_badge.id, season_id]
         );
-        if (cb.rows.length === 0) throw new Error('Custom badge not found for this season');
+        if (cb.rows.length === 0) {
+          const err = new Error('Custom badge not found for this season');
+          err.status = 400;
+          throw err;
+        }
         badgeId = cb.rows[0].id;
         badgeName = cb.rows[0].name;
       } else if (custom_badge.name) {

@@ -13,6 +13,12 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json({ limit: '2mb' }));
+app.use((err, req, res, next) => {
+  if (err.type === 'entity.too.large') {
+    return res.status(413).json({ error: 'Request body too large (max 2MB)' });
+  }
+  next(err);
+});
 
 // Share the DB pool with route handlers via app.set
 const pool = getDbPool();
