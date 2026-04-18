@@ -98,4 +98,18 @@ router.get('/:id/roster-with-hrs', async (req, res) => {
   }
 });
 
+router.get('/:id/bonus-total', async (req, res) => {
+  const pool = req.app.get('pool');
+  try {
+    const r = await pool.query(
+      'SELECT COALESCE(SUM(hrs), 0)::int as bonus_hrs FROM bonuses WHERE team_id = $1',
+      [req.params.id]
+    );
+    res.json({ bonus_hrs: r.rows[0].bonus_hrs });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 module.exports = router;
