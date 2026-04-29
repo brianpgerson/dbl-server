@@ -11,15 +11,14 @@ const STARTER_POSITIONS = ['C', '1B', '2B', 'SS', '3B', 'LF', 'CF', 'RF', 'DH'];
 
 // ---- helpers ----
 
-// Award a threshold milestone on the day a team first crosses it.
-// "First crosses" = total >= N AND total(yesterday) < N.
+// Award a threshold milestone once total >= N. No crossing-day check — the
+// orchestrator's skip-if-already-awarded handles dedup, and crossing-day was
+// fragile when the crossing HR ingested after that day's last cron evaluation.
 function milestone(threshold) {
   return async (pool, seasonId, asOfDate) => {
     const today = await standings(pool, seasonId, asOfDate);
-    const yesterday = await standings(pool, seasonId, addDays(asOfDate, -1));
-    const yMap = Object.fromEntries(yesterday.map(r => [r.team_id, r.total]));
     return today
-      .filter(r => r.total >= threshold && (yMap[r.team_id] || 0) < threshold)
+      .filter(r => r.total >= threshold)
       .map(r => ({ team_id: r.team_id, context: { total: r.total, threshold } }));
   };
 }
@@ -50,7 +49,7 @@ const evaluators = {
   double_century: milestone(200),
 
   contributor: async (pool, seasonId, asOfDate) => {
-    // Every starting position has ≥1 HR. Award on the day the 9th distinct position scores.
+    // Every starting position has ≥1 HR. Orchestrator skip-if-already-awarded handles dedup.
     const r = await pool.query(
       `SELECT team_id, COUNT(DISTINCT position)::int as distinct_positions
        FROM scores s JOIN teams t ON s.team_id = t.id
@@ -58,17 +57,9 @@ const evaluators = {
        GROUP BY team_id`,
       [seasonId, asOfDate]
     );
-    const yr = await pool.query(
-      `SELECT team_id, COUNT(DISTINCT position)::int as distinct_positions
-       FROM scores s JOIN teams t ON s.team_id = t.id
-       WHERE t.season_id = $1 AND s.date <= $2 AND s.position != 'BEN'
-       GROUP BY team_id`,
-      [seasonId, addDays(asOfDate, -1)]
-    );
-    const yMap = Object.fromEntries(yr.rows.map(row => [row.team_id, row.distinct_positions]));
     const need = STARTER_POSITIONS.length;
     return r.rows
-      .filter(row => row.distinct_positions >= need && (yMap[row.team_id] || 0) < need)
+      .filter(row => row.distinct_positions >= need)
       .map(row => ({ team_id: row.team_id, context: { positions: need } }));
   },
 
@@ -214,10 +205,6 @@ const evaluators = {
     if (s.length < 2) return [];
     const gap = s[0].total - s[1].total;
     if (gap < 10) return [];
-    // Award on the day the gap first reaches 10
-    const prev = await standings(pool, seasonId, addDays(asOfDate, -1));
-    const prevGap = prev.length >= 2 ? prev[0].total - prev[1].total : 0;
-    if (prevGap >= 10) return [];
     return [{ team_id: s[0].team_id, context: { gap, second: s[1].total } }];
   },
 
