@@ -70,8 +70,8 @@ echo "Created."
 bold "3/6 Restoring seed data..."
 
 [ -f "$SEED_FILE" ] || die "Seed file not found at backend/$SEED_FILE.
-Ask the commissioner to run ./scripts/export-prod-db.sh and send you the file,
-then place it at backend/$SEED_FILE and re-run this script."
+It ships with the repo — make sure your checkout is up to date (git pull).
+(Commissioner: regenerate it with ./scripts/export-prod-db.sh)"
 
 "$PG_BIN/pg_restore" --no-owner --no-acl -d "$DB_NAME" "$SEED_FILE" || true
 # pg_restore exits non-zero on harmless ownership warnings; verify for real:
