@@ -33,6 +33,7 @@ app.use('/api/leagues', require('./routes/leagues'));
 app.use('/api/admin', require('./routes/admin'));
 app.use('/api/draft', require('./routes/draft'));
 app.use('/api/big-dongos', require('./routes/big-dongos'));
+app.use('/api/hr-leaders', require('./routes/hr-leaders'));
 app.use('/api/badges', require('./routes/badges'));
 app.use('/api/feed', require('./routes/feed'));
 app.use('/api/status', require('./routes/status'));
