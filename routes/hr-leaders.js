@@ -1,15 +1,25 @@
 const express = require('express');
-const { getActiveSeason } = require('../helpers/league');
+const { getActiveSeason, formatDate } = require('../helpers/league');
 
 const router = express.Router();
 
-const VALID_POSITIONS = ['C', '1B', '2B', '3B', 'SS', 'LF', 'RF', 'CF', 'DH'];
+// players.primary_position stores raw MLB StatsAPI position codes (see
+// sync-mlb-data.js), not labels — same convention the draft position filter uses.
+const POSITION_LABELS = {
+  '2': 'C', '3': '1B', '4': '2B', '5': '3B', '6': 'SS',
+  '7': 'LF', '8': 'CF', '9': 'RF', '10': 'DH',
+  Y: 'DH', // two-way players slot as DH for this league
+  O: 'OF', // generic outfielder — surfaced in all three OF tabs
+};
+const TAB_POSITIONS = ['C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF', 'DH'];
 const TOP_N = 15;
 
 // GET /api/hr-leaders
 // Returns top 15 HR leaders per position (plus ALL) for the active season.
 // HR totals are real MLB stats from player_game_stats, not league-scored HRs.
-// manager_name is populated if the player is currently rostered on a team this season.
+// No status filter on purpose: season totals are historical facts, so IL'd or
+// demoted players keep their spot on the board.
+// manager_name is populated if the player is on a team's roster as of today.
 router.get('/', async (req, res) => {
   const pool = req.app.get('pool');
 
@@ -19,82 +29,73 @@ router.get('/', async (req, res) => {
       return res.status(404).json({ error: 'No active season found' });
     }
 
-    const today = new Date().toISOString().split('T')[0];
-    const seasonEnd = season.end_date instanceof Date
-      ? season.end_date.toISOString().split('T')[0]
-      : String(season.end_date).split('T')[0];
-    const effectiveEnd = today < seasonEnd ? today : seasonEnd;
-
     const result = await pool.query(
       `
-      WITH season_hrs AS (
-        SELECT
-          p.id          AS player_id,
-          p.name,
-          p.primary_position,
-          COALESCE(SUM(pgs.home_runs), 0)::integer AS total_hrs
-        FROM players p
-        JOIN player_game_stats pgs ON pgs.player_id = p.id
-          AND pgs.date >= $1
-          AND pgs.date <= $2
-        WHERE p.status = 'Active'
-          AND p.primary_position = ANY($3::text[])
-        GROUP BY p.id, p.name, p.primary_position
-        HAVING SUM(pgs.home_runs) > 0
-      ),
-      current_roster AS (
-        SELECT DISTINCT ON (tr.player_id)
-          tr.player_id,
-          t.manager_name
+      SELECT
+        p.id AS player_id,
+        p.name,
+        p.primary_position AS position_code,
+        COALESCE(SUM(pgs.home_runs), 0)::integer AS total_hrs,
+        cr.manager_name
+      FROM players p
+      JOIN player_game_stats pgs ON pgs.player_id = p.id
+        AND pgs.date >= $1
+        AND pgs.date <= $2
+      LEFT JOIN LATERAL (
+        SELECT t.manager_name
         FROM team_rosters tr
         JOIN teams t ON t.id = tr.team_id
-        WHERE t.season_id = $4
+        WHERE tr.player_id = p.id
+          AND t.season_id = $3
+          AND tr.effective_date <= CURRENT_DATE
           AND tr.end_date IS NULL
-        ORDER BY tr.player_id, tr.effective_date DESC
-      ),
-      ranked AS (
-        SELECT
-          sh.player_id,
-          sh.name,
-          sh.primary_position,
-          sh.total_hrs,
-          cr.manager_name,
-          ROW_NUMBER() OVER (
-            PARTITION BY sh.primary_position
-            ORDER BY sh.total_hrs DESC, sh.name ASC
-          ) AS pos_rank
-        FROM season_hrs sh
-        LEFT JOIN current_roster cr ON cr.player_id = sh.player_id
-      )
-      SELECT player_id, name, primary_position, total_hrs, manager_name, pos_rank
-      FROM ranked
-      WHERE pos_rank <= $5
-      ORDER BY primary_position, pos_rank
+        ORDER BY tr.effective_date DESC
+        LIMIT 1
+      ) cr ON true
+      WHERE p.primary_position = ANY($4::text[])
+      GROUP BY p.id, p.name, p.primary_position, cr.manager_name
       `,
-      [season.start_date, effectiveEnd, VALID_POSITIONS, season.id, TOP_N]
+      [
+        formatDate(season.start_date),
+        formatDate(season.end_date),
+        season.id,
+        Object.keys(POSITION_LABELS),
+      ]
     );
 
-    const byPosition = {};
-    for (const pos of VALID_POSITIONS) {
-      byPosition[pos] = [];
-    }
+    const sortFn = (a, b) => b.total_hrs - a.total_hrs || a.name.localeCompare(b.name);
+    const players = result.rows.map(({ position_code, ...row }) => ({
+      ...row,
+      primary_position: POSITION_LABELS[position_code],
+    }));
 
-    for (const row of result.rows) {
-      if (byPosition[row.primary_position]) {
-        byPosition[row.primary_position].push(row);
+    const byPosition = {};
+    for (const pos of TAB_POSITIONS) byPosition[pos] = [];
+    for (const player of players) {
+      const tabs = player.primary_position === 'OF'
+        ? ['LF', 'CF', 'RF']
+        : [player.primary_position];
+      for (const tab of tabs) {
+        if (byPosition[tab]) byPosition[tab].push(player);
       }
     }
+    for (const pos of TAB_POSITIONS) {
+      byPosition[pos] = byPosition[pos]
+        .sort(sortFn)
+        .slice(0, TOP_N)
+        .map((row, i) => ({ ...row, pos_rank: i + 1 }));
+    }
 
-    const allPlayers = result.rows
+    const all = players
       .slice()
-      .sort((a, b) => b.total_hrs - a.total_hrs || a.name.localeCompare(b.name))
+      .sort(sortFn)
       .slice(0, TOP_N)
       .map((row, i) => ({ ...row, pos_rank: i + 1 }));
 
     res.json({
       season_year: season.season_year,
       positions: byPosition,
-      all: allPlayers,
+      all,
     });
   } catch (err) {
     console.error(err);
