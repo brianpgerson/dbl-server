@@ -12,7 +12,7 @@ const POSITION_LABELS = {
   O: 'OF', // generic outfielder — surfaced in all three OF tabs
 };
 const TAB_POSITIONS = ['C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF', 'DH'];
-const TOP_N = 15;
+const TOP_N = 30;
 
 // GET /api/hr-leaders
 // Returns top 15 HR leaders per position (plus ALL) for the active season.
@@ -94,6 +94,10 @@ router.get('/', async (req, res) => {
 
     res.json({
       season_year: season.season_year,
+      // Full labeled list — the frontend buckets/filters/ranks from this.
+      players: players.slice().sort(sortFn),
+      // Legacy pre-bucketed shape, kept so an older deployed frontend
+      // keeps rendering during a backend-first deploy.
       positions: byPosition,
       all,
     });
