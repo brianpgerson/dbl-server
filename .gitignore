@@ -1,2 +1,5 @@
 node_modules/
 .env
+# the raw (unscrubbed) prod download — never commit; seed/dbl_seed.dump is the
+# scrubbed artifact and IS committed
+seed/.raw_prod.dump
