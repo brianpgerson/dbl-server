@@ -83,29 +83,44 @@ router.get('/:id/roster-with-hrs', async (req, res) => {
       .map(player => player.current_mlb_team_id)
       .filter(id => id !== null))];
 
-    const gameData = await getTodaysGameData(uniqueTeamIds);
+    const today = new Date().toISOString().split('T')[0];
+    const playerIds = result.rows.map(p => p.player_id);
 
-    const rosterWithGames = result.rows.map(player => ({
-      ...player,
-      game_info: gameData[player.current_mlb_team_id]?.text || 'No game',
-      game_status: gameData[player.current_mlb_team_id]?.status || 'none'
-    }));
+    const [gameData, todayStatsResult] = await Promise.all([
+      getTodaysGameData(uniqueTeamIds),
+      pool.query(
+        `SELECT player_id, SUM(home_runs)::integer AS today_hrs
+         FROM player_game_stats
+         WHERE date = $1 AND player_id = ANY($2::int[])
+         GROUP BY player_id`,
+        [today, playerIds]
+      )
+    ]);
+
+    const todayHrsByPlayer = {};
+    for (const row of todayStatsResult.rows) {
+      todayHrsByPlayer[row.player_id] = row.today_hrs;
+    }
+
+    const rosterWithGames = result.rows.map(player => {
+      const gameStatus = gameData[player.current_mlb_team_id]?.status || 'none';
+      const todayHrs = todayHrsByPlayer[player.player_id];
+
+      let game_info;
+      if (gameStatus === 'none') {
+        game_info = 'No game';
+      } else if (gameStatus === 'final') {
+        const count = todayHrs || 0;
+        game_info = count === 0 ? '0 dongs' : `${count} dong${count === 1 ? '' : 's'}`;
+      } else {
+        // scheduled, live, delayed, postponed -- keep existing game time/status text
+        game_info = gameData[player.current_mlb_team_id].text;
+      }
+
+      return { ...player, game_info, game_status: gameStatus };
+    });
 
     res.json(rosterWithGames);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Server error' });
-  }
-});
-
-router.get('/:id/bonus-total', async (req, res) => {
-  const pool = req.app.get('pool');
-  try {
-    const r = await pool.query(
-      'SELECT COALESCE(SUM(hrs), 0)::int as bonus_hrs FROM bonuses WHERE team_id = $1',
-      [req.params.id]
-    );
-    res.json({ bonus_hrs: r.rows[0].bonus_hrs });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Server error' });
